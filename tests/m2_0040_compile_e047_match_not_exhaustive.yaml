@@ -1,0 +1,19 @@
+---
+title: "Compile E047 — match on int without default arm is not exhaustive"
+file_separator: "#NLFILE"
+expected_compile_error: "E047"
+---
+
+#NLFILE compile/e047/Main.nl
+namespace compile.e047;
+class Main {
+	public static int main(string[] args) {
+		int code = 200;
+		string label = match(code) {
+			200: "ok",
+			404: "not found",
+		};
+		system.Out.print(label);
+		return 0;
+	}
+}

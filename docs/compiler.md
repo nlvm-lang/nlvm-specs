@@ -13,6 +13,7 @@ complements [specs.md](specs.md) (language semantics) and [stdlib.md](stdlib.md)
 * [Null safety](#null-safety)
     * [Assignment to non-nullable types](#assignment-to-non-nullable-types)
     * [Union type compatibility](#union-type-compatibility)
+    * [Type narrowing (smart casts)](#type-narrowing-smart-casts)
 * [Type checking](#type-checking)
     * [Auto type deduction](#auto-type-deduction)
     * [Template instantiation](#template-instantiation)
@@ -28,6 +29,9 @@ complements [specs.md](specs.md) (language semantics) and [stdlib.md](stdlib.md)
 * [Exception checking](#exception-checking)
     * [Checked exception propagation](#checked-exception-propagation)
     * [Exception inheritance rules](#exception-inheritance-rules)
+    * [Unreachable catch clauses](#unreachable-catch-clauses)
+* [Match exhaustiveness](#match-exhaustiveness)
+* [Constructor delegation](#constructor-delegation)
 * [Visibility enforcement](#visibility-enforcement)
 * [Inheritance modifiers (abstract, final)](#inheritance-modifiers-abstract-final)
     * [Static context restrictions](#static-context-restrictions)
@@ -129,6 +133,46 @@ string|int value = true;     // E004 — bool is not in the union
 ```
 
 **Error:** `E004 — Type '%s' is not assignable to '%s'`
+
+### Type narrowing (smart casts)
+
+The compiler performs **flow-sensitive type narrowing** on union-typed values: after a type test, the value's
+static type is refined within the region where the test is known to hold (as in Kotlin's smart casts or
+TypeScript's narrowing). Narrowing applies to **local variables and parameters only**.
+
+**Narrowing conditions:**
+
+| Test | Effect |
+|------|--------|
+| `x != null` (or `x == null` with `else`) | In the branch where the test holds, `x: T\|null` is narrowed to `T`. In the other branch, `x` is narrowed to `null`. |
+| `x instanceof C` | In the `true` branch, `x` is narrowed to `C` (and `null` is removed — `instanceof` is `false` for `null`). |
+| Early exit: `if (x == null) { return; }` (or `throw`, `break`, `continue`, `Process.exit`) | After the `if`, `x` is narrowed to `T` (the null path cannot reach that point). |
+| `&&` chains: `x != null && x.length() > 0` | The narrowing from the left operand applies within the right operand. |
+| `\|\|` chains: `x == null \|\| x.length() == 0` | The negation of the left operand applies within the right operand (in the example, `x` is non-null in `x.length() == 0`). |
+| Ternary condition | Same as `if`/`else`: each branch sees the narrowing implied by the condition. |
+
+For general unions (`A|B|null`), each test removes or selects constituents: after `if (v instanceof A)`, `v` is
+`A` in the branch; after `if (v == null) return;`, `v` is `A|B`.
+
+**Invalidation rules** — narrowing is discarded when the compiler can no longer guarantee the tested fact:
+
+- An **assignment** to the variable inside the narrowed region resets its type to the declared type (then
+  re-narrows from subsequent tests).
+- A variable **captured by a closure that mutates it** is never narrowed (the closure may run between the test
+  and the use).
+- **Properties are not narrowed** (`this.x != null` does not narrow `this.x` — another method or thread may
+  reassign it between the test and the use). Copy the property into a local variable first:
+
+```nl
+string|null n = this.name;   // copy to a local
+if (n != null) {
+    system.Out.print(n.length());   // OK — n narrowed to string
+}
+// if (this.name != null) { this.name.length(); }  // E004 — properties are not narrowed
+```
+
+Uses of a union-typed value in a context requiring a specific type, without sufficient narrowing, are rejected
+with **E004**.
 
 ---
 
@@ -306,6 +350,59 @@ types from its `throws` clause. E016 and E017 apply only to checked exceptions.
 **Error:** `E016 — Overriding method does not declare exception '%s' from parent method`
 **Error:** `E017 — Overriding method declares exception '%s' not thrown by parent method`
 
+### Unreachable catch clauses
+
+Catch clauses of a `try` are tested in declaration order (see [specs.md § Exception handling](specs.md#exception-handling)).
+The compiler must reject a catch clause that can never execute because an **earlier** clause of the same `try`
+already catches the same exception type or a superclass of it. This includes two catch clauses with the exact
+same exception type.
+
+```
+try { ... }
+catch (Exception ex) { ... }
+catch (IOException ex) { ... }   // E048 — Exception above already catches IOException
+```
+
+**Error:** `E048 — Unreachable catch clause: '%s' is already caught by earlier clause '%s'`
+
+---
+
+## Match exhaustiveness
+
+A `match` expression must be exhaustive at compile time (see [specs.md § Match exhaustiveness](specs.md#match-exhaustiveness)).
+The compiler must verify:
+
+- **Enum subject:** every enum case is covered by an arm, or a `default` arm is present.
+- **`bool` subject:** both `true` and `false` are covered, or a `default` arm is present.
+- **`int`, `string`, and any other subject type:** a `default` arm is required.
+- **Duplicate arms:** two arms with the same constant value make the second unreachable — rejected with the same
+  error code.
+- A `default` arm, when present, must be the **last** arm.
+
+Because exhaustiveness is verified statically, no runtime "unmatched value" error exists.
+
+**Error:** `E047 — Match expression is not exhaustive (missing '%s')`
+
+---
+
+## Constructor delegation
+
+A constructor may delegate to another constructor of the same class (`this(...)`) or of the parent class
+(`super(...)`); see [specs.md § Constructor chaining](specs.md#constructor-chaining-this). The compiler must verify:
+
+- A constructor contains **at most one** delegation call (`this(...)` or `super(...)`, never both), and it is the
+  **first statement** of the constructor body (E045).
+- `this(...)` delegation chains are **acyclic**. The compiler builds the delegation graph of the class's
+  constructors and rejects any cycle (E046).
+- The delegation target is resolved by overload resolution on the argument types; no matching constructor is a
+  regular resolution error.
+- **Definite assignment:** for property initialization analysis ([§ Class properties](#class-properties)), a
+  constructor that delegates with `this(...)` is credited with every property assignment guaranteed by the target
+  constructor.
+
+**Error:** `E045 — Constructor delegation call ('this' or 'super') must be the first statement`
+**Error:** `E046 — Constructor delegation cycle detected in class '%s'`
+
 ---
 
 ## Visibility enforcement
@@ -344,9 +441,14 @@ The compiler enforces the rules for `abstract` and `final` as defined in [specs.
 
 - A final class cannot be extended.
 - A final method cannot be overridden.
+- `abstract` and `final` are mutually exclusive — on a class as on a method (see
+  [specs.md § Final classes and methods](specs.md#final-classes-and-methods)). `readonly` combines freely with
+  either (`abstract class readonly`, `final class readonly`); modifier order is
+  `[abstract | final] class [readonly] Name` (see [specs.md § Readonly](specs.md#readonly)).
 
 **Error:** `E035 — Cannot extend final class '%s'`
 **Error:** `E036 — Cannot override final method '%s'`
+**Error:** `E049 — Conflicting modifiers 'abstract' and 'final' on '%s'`
 
 ### Static context restrictions
 
@@ -521,6 +623,10 @@ Non-nullable reference properties have no default and must be initialized — se
 | E015 | Exceptions | Unhandled checked exception |
 | E016 | Exceptions | Missing exception in overriding method |
 | E017 | Exceptions | New exception in overriding method |
+| E048 | Exceptions | Unreachable catch clause |
+| E047 | Match | Match expression not exhaustive |
+| E045 | Constructors | Delegation call not first statement |
+| E046 | Constructors | Constructor delegation cycle |
 | E018 | Visibility | Member not accessible |
 | E019 | Visibility | Missing visibility modifier |
 | E020 | Ref params | Ref argument must be a variable |
@@ -541,6 +647,7 @@ Non-nullable reference properties have no default and must be initialized — se
 | E034 | Abstract/Final | Abstract method cannot have body |
 | E035 | Abstract/Final | Cannot extend final class |
 | E036 | Abstract/Final | Cannot override final method |
+| E049 | Abstract/Final | Conflicting `abstract` and `final` modifiers |
 | E040 | Static context | Cannot use `this`, `Self`, or instance member in static method |
 | E041 | Duplicates | Duplicate method with identical signature |
 | E042 | Duplicates | Duplicate class definition |

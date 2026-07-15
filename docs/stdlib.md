@@ -18,6 +18,7 @@ This document describes the virtual standard library provided by the NL runtime 
 * [system.Bool](#systembool)
 * [system.String](#systemstring)
 * [system.Random](#systemrandom)
+* [system.SecureRandom](#systemsecurerandom)
 * [system.Uuid](#systemuuid)
 * [system.List](#systemlist)
 * [system.Map](#systemmap)
@@ -49,7 +50,7 @@ This document describes the virtual standard library provided by the NL runtime 
 
 | Namespace   | Purpose                          |
 |------------|-----------------------------------|
-| `system`   | Standard streams (Out, Err, In), parsing and conversion (Int, Float, Bool), String, Random, Uuid, Env, **List&lt;T&gt;**, **Map&lt;K,V&gt;**, **MapEntry&lt;K,V&gt;**; core interfaces (Stringable, Cloneable, ValueEquatable) |
+| `system`   | Standard streams (Out, Err, In), parsing and conversion (Int, Float, Bool), String, Random, SecureRandom, Uuid, Env, **List&lt;T&gt;**, **Map&lt;K,V&gt;**, **MapEntry&lt;K,V&gt;**; core interfaces (Stringable, Cloneable, ValueEquatable) |
 | `system.io`| File system (File, FileHandle, FileMode, Directory, Path), glob, Grep |
 | `system.net`| Network (TcpListener, TcpStream, UdpSocket, Http) |
 | `system.thread`| Threads (Thread), synchronization (Mutex, Semaphore) |
@@ -218,13 +219,23 @@ Static parsing and conversion for integer values. All methods are **static**.
 | Method | Signature | Description |
 |--------|------------|-------------|
 | `parse` | `static int parse(string s) throws NumberFormatException` | Parses `s` as a decimal integer. Throws if format is invalid. |
+| `tryParse` | `static int\|null tryParse(string s)` | Parses `s` as a decimal integer; returns **`null`** instead of throwing when the format is invalid. Safe-by-default alternative to `parse` for untrusted input (CLI args, files, network data). |
 | `toString` | `static string toString(int n)` | Returns the string representation of `n`. Same representation as used for string concatenation and `system.Out.print(n)`. |
+
+**Safety note:** `NumberFormatException` is a *runtime* exception — the compiler does **not** force callers of
+`parse` to handle it. A program that feeds untrusted input to `parse` without `try/catch` crashes on malformed
+input. Prefer `tryParse` and a `null` check (the naming follows `enum.tryFrom`).
 
 **Example**
 
 ```nl
 int n = system.Int.parse("42");
 string s = system.Int.toString(42);  // "42"
+
+int|null m = system.Int.tryParse(userInput);
+if (m == null) {
+    system.Err.println("invalid number: " + userInput);
+}
 ```
 
 ---
@@ -236,6 +247,7 @@ Static parsing and conversion for floating-point values. All methods are **stati
 | Method | Signature | Description |
 |--------|------------|-------------|
 | `parse` | `static float parse(string s) throws NumberFormatException` | Parses `s` as a float. Throws if format is invalid. |
+| `tryParse` | `static float\|null tryParse(string s)` | Parses `s` as a float; returns **`null`** instead of throwing when the format is invalid. Safe-by-default alternative to `parse` for untrusted input. |
 | `toString` | `static string toString(float x)` | Returns the string representation of `x`. Same representation as used for string concatenation and `system.Out.print(x)`. |
 
 **Example**
@@ -243,6 +255,7 @@ Static parsing and conversion for floating-point values. All methods are **stati
 ```nl
 float x = system.Float.parse("3.14");
 string s = system.Float.toString(3.14);  // e.g. "3.14"
+float|null y = system.Float.tryParse(userInput);  // null on invalid input
 ```
 
 ---
@@ -254,6 +267,7 @@ Static parsing and conversion for boolean values. All methods are **static**.
 | Method | Signature | Description |
 |--------|------------|-------------|
 | `parse` | `static bool parse(string s) throws IllegalArgumentException` | Parses `s` as a boolean. Accepts exactly `"true"` or `"false"` (case-sensitive). Throws if the string does not match. |
+| `tryParse` | `static bool\|null tryParse(string s)` | Same parsing; returns **`null`** instead of throwing when the string matches neither `"true"` nor `"false"`. |
 | `toString` | `static string toString(bool b)` | Returns the string representation of `b` (e.g. `"true"` or `"false"`). Same representation as used for string concatenation and `system.Out.print(b)`. |
 
 **Example**
@@ -320,6 +334,10 @@ string sub = text.substring(2, 8);       // "Hello,"
 
 Pseudo-random number generator. Create an instance (optionally with a seed) and call methods to get random values.
 
+**Security:** `system.Random` is a deterministic PRNG intended for games, simulations, and sampling. It is
+**not suitable for security purposes** (session tokens, nonces, keys, password reset codes) — its output is
+predictable from its seed or from observed values. Use [`system.SecureRandom`](#systemsecurerandom) instead.
+
 | Method | Signature | Description |
 |--------|------------|-------------|
 | `construct` | `construct()` | Creates a generator with an implementation-defined seed. |
@@ -338,13 +356,35 @@ float f = rng.nextFloat();
 
 ---
 
+## system.SecureRandom
+
+Cryptographically secure random number generator (CSPRNG), backed by the operating system's entropy source
+(e.g. `/dev/urandom`, `getrandom(2)`, `BCryptGenRandom`). Not seedable — there is no reproducible mode. Use it
+for security-sensitive values: session tokens, nonces, keys, salts. All methods are **static**.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `nextBytes` | `static void nextBytes(byte[] buffer)` | Fills `buffer` entirely with cryptographically secure random bytes. |
+| `nextInt` | `static int nextInt()` | Returns a cryptographically secure random integer (full range). |
+| `nextInt` | `static int nextInt(int bound)` | Returns a cryptographically secure random int in `[0, bound)`, uniformly distributed (no modulo bias). |
+
+**Example**
+
+```nl
+byte[] token = new byte[32];
+system.SecureRandom.nextBytes(token);
+string tokenB64 = system.text.Encoding.base64Encode(token);
+```
+
+---
+
 ## system.Uuid
 
 Universally unique identifier generation. All methods are **static**.
 
 | Method | Signature | Description |
 |--------|------------|-------------|
-| `random` | `static string random()` | Returns a new UUID as a string (e.g. `"550e8400-e29b-41d4-a716-446655440000"`). |
+| `random` | `static string random()` | Returns a new **UUID version 4** (random) as a lowercase string (e.g. `"550e8400-e29b-41d4-a716-446655440000"`). The 122 random bits **must** come from the CSPRNG (same source as [`system.SecureRandom`](#systemsecurerandom)), making the identifiers unpredictable. |
 
 **Example**
 
@@ -479,6 +519,15 @@ Static operations on the file system. All methods are **static**.
 | `writeAllText` | `static void writeAllText(string path, string content) throws IOException` | Overwrites the file at `path` with `content`. |
 | `glob` | `static string[] glob(string basePath, string pattern) throws IOException` | Returns paths under `basePath` matching `pattern` (glob or regex). See [Glob](#systemiofile-glob). |
 
+**Security (path traversal):** File system APIs (`File.open`, `File.readAllText`, `File.writeAllText`,
+`File.glob`, `Directory.create`, `Directory.remove`, `Directory.list`, `Process.setCwd`) perform **no path
+sanitization** and operate with the full privileges of the NL process. Absolute paths, `..` traversal, and
+symlinks are followed as-is — **path validation is the caller's responsibility**. Never pass user-controlled
+input (e.g. from `system.In.readLine()`, `args`, or network data) directly as a path: an attacker could read or
+overwrite arbitrary files (`"../../../../etc/shadow"`). For untrusted input, resolve with
+[`system.io.Path.normalize`](#systemiopath) and verify the result stays under an allowed base directory (e.g.
+`normalized.startsWith(baseDir)`) before any file operation.
+
 **Example**
 
 ```nl
@@ -525,6 +574,11 @@ Represents an open file. Obtained from `system.io.File.open`. Implements resourc
 | `flush` | `void flush() throws IOException` | Flushes the write buffer to the file. |
 
 The runtime may provide a destructor that calls `close()` if the handle goes out of scope without being closed. Multiple calls to `close()` have no effect after the first. **After the handle has been closed, any call to `read`, `readLine`, `write`, or `flush` throws `IOException`.**
+
+**Bounds checking:** `read(buffer, offset, length)` and `write(data, offset, length)` **must** throw
+`IndexOutOfBoundsException` (before performing any I/O) when `offset < 0`, `length < 0`, or
+`offset + length > buffer.length()` — the check must be immune to integer overflow of `offset + length`. The same
+rule applies to `TcpStream.read`/`write` and `UdpSocket` buffers.
 
 **Example**
 
@@ -646,6 +700,9 @@ Represents a connected TCP stream, obtained from `TcpListener.accept()` or `TcpS
 
 The runtime may provide a destructor that calls `close()` if the stream goes out of scope without being closed. **After the stream has been closed, any call to `read` or `write` throws `IOException`.**
 
+**Bounds checking:** `read` and `write` follow the same rule as [FileHandle](#systemiofilehandle): `offset < 0`,
+`length < 0`, or `offset + length > buffer.length()` throws `IndexOutOfBoundsException` before any I/O.
+
 **Example**
 
 ```nl
@@ -670,7 +727,9 @@ UDP datagram socket for connectionless communication. Can send and receive datag
 | `receive` | `int receive(byte[] buffer) throws IOException` | Receives a datagram into `buffer`. Returns number of bytes received. |
 | `close` | `void close()` | Closes the socket. Idempotent. |
 
-After the socket has been closed, any call to `send` or `receive` throws `IOException`.
+After the socket has been closed, any call to `send` or `receive` throws `IOException`. `receive(buffer)` fills
+the buffer from index `0` and never writes past `buffer.length()`; datagrams larger than the buffer are truncated
+(the excess bytes are discarded).
 
 **Example**
 
@@ -695,6 +754,12 @@ Simple HTTP client for GET and POST requests. All methods are **static**.
 | `post` | `static HttpResponse post(string url, string body) throws IOException` | Performs a POST request with the given body. |
 
 **HttpResponse** (result type): has `int statusCode`, `string body`, and optionally `string[] headers`. Encoding (e.g. UTF-8) is implementation-defined.
+
+**TLS (https):** For `https://` URLs, implementations **must validate the server certificate by default**: chain
+of trust against the platform trust store, expiration, and hostname verification. A failed validation **must**
+throw `IOException` — silently proceeding would expose users to man-in-the-middle attacks. No option to disable
+validation is specified; custom trust stores, certificate pinning, and a TLS wrapper for `TcpStream` may be
+specified in a future version.
 
 **Example**
 
@@ -831,6 +896,16 @@ auto dt = system.time.DateTime.now(tz);
 
 Environment variables of the current process. All methods are **static**.
 
+**Thread safety:** `Env.set()` and `Env.remove()` modify the process environment, which is a shared global
+resource; calling them concurrently from multiple threads (or while another thread reads with `Env.get()` /
+`Env.list()`) is **undefined behavior** on most platforms. Synchronize with `system.thread.Mutex`, or set all
+variables from the main thread before spawning threads.
+
+**Security:** environment variables frequently contain secrets (API keys, connection strings). Do not display
+the output of `Env.list()`/`Env.get()` to untrusted users. Variables like `PATH` or `LD_PRELOAD` influence how
+subprocesses resolve executables and libraries — setting them from untrusted input then calling
+`system.ps.Process.run` enables code injection.
+
 | Method | Signature | Description |
 |--------|------------|-------------|
 | `get` | `static string|null get(string name)` | Returns the value of the variable `name`, or `null` if unset. |
@@ -904,19 +979,25 @@ Regular expression match and replace. All methods are **static**.
 
 | Method | Signature | Description |
 |--------|------------|-------------|
-| `match` | `static bool match(string pattern, string input)` | Returns `true` if `input` matches `pattern`. |
-| `matchFirst` | `static RegexMatch|null matchFirst(string pattern, string input)` | Returns the first match with groups, or `null`. |
+| `match` | `static bool match(string pattern, string input)` | Returns `true` if `pattern` is found **anywhere** in `input` (**partial match**, like `grep` and PHP's `preg_match`). For a full match, anchor the pattern explicitly: `"^…$"`. |
+| `matchFirst` | `static RegexMatch|null matchFirst(string pattern, string input)` | Returns the first match with groups, or `null`. Partial-match semantics, like `match`. |
 | `replace` | `static string replace(string pattern, string input, string replacement)` | Replaces all matches of `pattern` in `input` with `replacement`. |
 | `split` | `static string[] split(string pattern, string input)` | Splits `input` by occurrences of `pattern`. |
+| `escape` | `static string escape(string s)` | Returns `s` with every regex metacharacter escaped, so the result matches `s` **literally**. Always use it when embedding user-controlled input in a pattern. |
 
 **RegexMatch** (result type): has `string fullMatch`, `string[] groups` (capture groups). Exact API is implementation-defined.
 
 **Example**
 
 ```nl
-bool ok = system.text.Regex.match("\\d+", "123");
+bool ok = system.text.Regex.match("\\d+", "abc123");        // true — partial match
+bool full = system.text.Regex.match("^\\d+$", "abc123");    // false — anchored (full match)
 string cleaned = system.text.Regex.replace("\\s+", "a  b  c", " ");
 string[] parts = system.text.Regex.split("\\s*,\\s*", "a, b , c");
+
+// Embedding user input in a pattern: escape it
+string safe = system.text.Regex.escape(userInput);           // "a.b*" -> "a\\.b\\*"
+bool found = system.text.Regex.match(safe, haystack);
 ```
 
 ---
@@ -949,7 +1030,7 @@ Standard exceptions used by the system API. The hierarchy (Runtime vs Checked) i
 
 | Exception | Kind | Namespace | Thrown by |
 |-----------|------|-----------|-----------|
-| `IndexOutOfBoundsException` | Runtime | `system` | Array access via `[]` when index is out of range; `system.List.get`, `system.List.set`, `system.List.remove` when index is out of range; `system.List.popBack`, `system.List.popFront` when the list is empty; **`string.charAt`, `string.substring`** when index or range is out of range |
+| `IndexOutOfBoundsException` | Runtime | `system` | Array access via `[]` when index is out of range; `system.List.get`, `system.List.set`, `system.List.remove` when index is out of range; `system.List.popBack`, `system.List.popFront` when the list is empty; **`string.charAt`, `string.substring`** when index or range is out of range; **byte-array `read`/`write` bounds violations** on `FileHandle`, `TcpStream` (negative `offset`/`length`, or `offset + length > buffer.length()`) |
 | `NumberFormatException` | Runtime | `system` | `system.Int.parse`, `system.Float.parse` when the string format is invalid |
 | `IllegalArgumentException` | Runtime | `system` | `enum.from()` when value does not match any case; `system.Bool.parse` when string is not `"true"` or `"false"`; `system.time.TimeZone.get()` when the timezone ID is unknown |
 | `StackOverflowException` | Runtime | `system` | Thrown by the VM when the call stack is exhausted (e.g. infinite recursion) |

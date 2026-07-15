@@ -1,0 +1,23 @@
+---
+title: "Compile E048 — catch clause unreachable (superclass caught first)"
+file_separator: "#NLFILE"
+expected_compile_error: "E048"
+---
+
+#NLFILE compile/e048/Main.nl
+namespace compile.e048;
+class Main {
+	public static int main(string[] args) {
+		try {
+			throw new IOException("boom");
+		}
+		catch (Exception ex) {
+			system.Out.print(ex.message);
+		}
+		catch (IOException ex) {
+			// unreachable: Exception above already catches IOException
+			system.Out.print(ex.message);
+		}
+		return 0;
+	}
+}

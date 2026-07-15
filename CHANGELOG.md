@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.8.43 — 2026-07-14
+
+Security hardening pass — resolves coherence VIII-2, VIII-3, VIII-4, VIII-5, VIII-6, VIII-7, VIII-9, VIII-10
+(security-audit SEC-02, SEC-03, SEC-05, SEC-06 (Env), SEC-08, SEC-09, SEC-10, SEC-16, SEC-18, SEC-23).
+
+### Added
+
+- **docs/stdlib.md** — § system.Int / system.Float / system.Bool: `tryParse(string) : T|null` — safe-by-default parsing, returns `null` instead of throwing on invalid input (naming aligned with `enum.tryFrom`); safety note on `parse` with untrusted input.
+- **docs/stdlib.md** — § system.SecureRandom (new): OS-backed CSPRNG (`nextBytes`, `nextInt`, bias-free bounded `nextInt`), not seedable. § system.Uuid: `random()` specified as **UUID v4** generated from the CSPRNG. § system.Random: documented as unsuitable for security purposes.
+- **docs/stdlib.md** — § system.text.Regex: `escape(string)` for literal use of user input in patterns; `match`/`matchFirst` specified as **partial match** (anchor with `^…$` for full match, consistent with Grep).
+- **docs/vm.md** — § Module integrity (new): integrity trailer at end of module (`hash_algo` u8 + hash; SHA-256 recommended by default), mandatory load-time verification when present, trust model documented. Module format version 1 → 2.
+- **tests/m7_0040_tryparse_null.yaml** — Run test for `Int.tryParse` / `Float.tryParse` (null on invalid input).
+
+### Changed
+
+- **docs/specs.md** — § Native types: new **Integer overflow** subsection — `int` is 64-bit two's complement, `+ - *` wrap silently, comparator anti-pattern `a - b` documented; all comparator examples now use the overflow-safe `a <=> b`. § Entry point: Calculator example rewritten with `tryParse` + null check.
+- **docs/stdlib.md** — § system.io.File: **path traversal** security note (no sanitization; validation is the caller's responsibility; `Path.normalize` + base-directory check for untrusted input). § system.io.FileHandle / system.net.TcpStream: byte-array `read`/`write` must throw `IndexOutOfBoundsException` on `offset < 0 || length < 0 || offset + length > buffer.length()`, checked before any I/O and immune to integer overflow; `UdpSocket.receive` truncates oversized datagrams. § system.net.Http: mandatory TLS certificate validation for `https://` (chain, expiration, hostname; failure throws IOException). § system.Env: thread-safety (concurrent set/remove is UB — synchronize) and security note (secrets exposure; `PATH`/`LD_PRELOAD` injection with `Process.run`). § Exceptions table: bounds violations added to `IndexOutOfBoundsException`.
+
+### Updated references
+
+- **docs/milestones.md** — M3: line-number table + module integrity; M7: SecureRandom.
+- **review/security-audit.md** — Resolution notes on SEC-02, SEC-03, SEC-05, SEC-06, SEC-08, SEC-09, SEC-10, SEC-16, SEC-17, SEC-18, SEC-22, SEC-23; prioritized recommendations updated (all "Immediate" items now resolved).
+- **review/coherence.md** — VIII-2, VIII-3, VIII-4, VIII-5, VIII-6, VIII-7, VIII-9, VIII-10 resolved; **all items closed**, archived to `archives/coherence_closed_20260714.md`.
+
+## 0.8.42 — 2026-07-14
+
+VM and module format gaps — resolves coherence IV-1, IV-2, IV-3, IV-4, IV-7 (security-audit SEC-17).
+
+### Added
+
+- **docs/vm.md** — § Module format: class flag bits 3 `ABSTRACT`, 4 `FINAL` (VM rejects `NEW` on abstract classes and extension of final classes at link time; both bits set is a load error). § Method descriptor: method flag bits 8 `ABSTRACT`, 9 `FINAL` (link-time rejection of final-method overrides).
+- **docs/vm.md** — § Method descriptor: **line-number table** (`line_table_count` u16 + `{start_pc: u16, line: u32}` entries) for stack-trace debug info; `line_table_count = 0` for stripped builds (stack trace lines report `0`). Module format version bumped (see 0.8.43 — v2 covers both changes).
+- **docs/vm.md** — § Method descriptor: **abstract method representation** — ABSTRACT methods have `code_length = 0`, empty code/exception/line tables; loader rejects abstract-with-code and concrete-without-code.
+- **docs/vm.md** — § Control flow: documented wide-conditional-branch strategy — no `IF_TRUE_W`/`IF_FALSE_W`; the compiler emits the inverted condition over a `GOTO_W` for targets beyond ±32 KiB.
+
+### Changed
+
+- **docs/vm.md** — § Stack trace construction: `stackTrace` is captured and assigned **during the base `Exception` constructor** (native capture, exception-constructor frames excluded) — an ordinary readonly assignment inside `construct`; the VM needs **no readonly bypass**. `line` derived from the new line-number table.
+- **docs/specs.md** — § Exception class hierarchy: stack trace capture note aligned with vm.md.
+
+### Updated references
+
+- **review/coherence.md** — IV-1, IV-2, IV-3, IV-4, IV-7 resolved.
+
+## 0.8.41 — 2026-07-14
+
+Language decisions — resolves coherence II-2, II-8, II-9, II-11, II-16, VI-1 through VI-8. Error codes 44 → 49
+(E045–E049).
+
+### Added
+
+- **docs/specs.md** — § Operator precedence: full 12-level precedence table (primary/postfix → unary → multiplicative → additive → `<=>` → relational/`instanceof` → equality → `&&` → `||` → ternary → `??`/`?:` → assignment) with associativity.
+- **docs/specs.md** — § Interface inheritance: `interface A extends B, C` — any number of parent interfaces; implementing classes implement all inherited methods; parents are supertypes for upcasts and `instanceof`; conflicting diamond declarations → E041.
+- **docs/specs.md** — § Constructor chaining (`this(...)`): delegation to a same-class constructor; at most one delegation call (`this` or `super`), first statement (E045); acyclic chains (E046); definite-assignment credit from the target constructor.
+- **docs/specs.md** — § `Self` in interfaces: `Self` denotes the implementing class; signatures instantiated per implementing class at compile time (covariant returns for `Cloneable.clone`, parameter types for `ValueEquatable.valueEquals`); inherited implementations keep the defining class's resolution.
+- **docs/specs.md** — § Match exhaustiveness: `match` must be exhaustive at compile time (E047) — enum: all cases or `default`; `bool`: both values or `default`; int/string/others: `default` required; duplicate arms unreachable; `default` last. A `match` never fails at runtime.
+- **docs/specs.md** — § Common result type: shared 5-rule algorithm (identity, implicit conversion, `null` literal, nearest common ancestor, otherwise **union**) defining the result types of `? :`, `??`, `?:`, and lambda return deduction.
+- **docs/specs.md** — § Return type deduction rules (anonymous functions): single-expression body; common result type of `return` expressions for block bodies; `void` when no valued return; mixing bare/valued returns is an error; target typing takes precedence.
+- **docs/specs.md** — § Overloadable operators: exhaustive table with required signatures (`+ - * / %` → `type … const`; `+= …` → `Self`; `< > <= >=` → `bool … const`; `<=>` → `int … const`; unary `-`/`!` const; `++`/`--` → `Self`, same method prefix/postfix — postfix yields the mutated reference) and the non-overloadable list (`==`/`!=`, `&&`/`||`, `=`, conditionals, `.`/`new`/cast/`instanceof`, `[]` moved to Planned).
+- **docs/specs.md** — § Exception handling: catch clause ordering — clauses tested in order; unreachable clause (same type or supertype caught earlier) → E048.
+- **docs/specs.md** — § Readonly / § Final: modifier combinations — `readonly` orthogonal to `abstract`/`final` (`abstract class readonly`, `final class readonly` valid); `abstract` + `final` mutually exclusive on classes too (E049); canonical order `[abstract | final] class [readonly] Name`.
+- **docs/compiler.md** — § Type narrowing (smart casts): flow-sensitive narrowing for locals and parameters (`!= null`, `instanceof`, early exits, `&&`/`||` chains, ternary conditions); invalidation on reassignment; no narrowing for closure-mutated captures or properties (copy to a local). § Match exhaustiveness (E047), § Unreachable catch clauses (E048), § Constructor delegation (E045, E046), § Final: conflicting modifiers (E049). Error count 44 → 49.
+- **docs/vm.md** — § Constructors: `this(...)` delegation compiles to `INVOKE_SPECIAL` on the sibling constructor. § Match expressions: no runtime unmatched path (compile-time exhaustiveness). § Module format: INTERFACE modules use the `interfaces` list for extended interfaces.
+- **tests/m2_0040_compile_e047_match_not_exhaustive.yaml**, **tests/m2_0050_compile_e048_unreachable_catch.yaml**, **tests/m2_0060_smart_cast_narrowing.yaml**, **tests/m5_0030_constructor_chaining.yaml** — new tests.
+
+### Updated references
+
+- **docs/milestones.md** — Error count 44 → 49; M2 scope: type narrowing, match exhaustiveness (E047), unreachable catch (E048), constructor delegation (E045–E046), conflicting modifiers (E049); error test range E001–E049.
+- **README.md** — Error code count 44 → 49.
+- **review/coherence.md** — II-2, II-8, II-9, II-11, II-16, VI-1…VI-8 resolved.
+
 ## 0.8.40 — 2026-03-06
 
 ### Changed

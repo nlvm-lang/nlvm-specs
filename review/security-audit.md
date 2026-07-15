@@ -64,6 +64,8 @@ string content = system.io.File.readAllText(filename);
 2. Add a security section in stdlib.md warning about path traversal risks.
 3. Consider specifying an optional sandboxing mechanism (a "base directory" that restricts all I/O to a subtree) for future milestones.
 
+*(Fixed 0.8.43 — stdlib.md § system.io.File: security note on path traversal; validation is the caller's responsibility; recommends `Path.normalize` + base-directory check. Sandboxing remains future work, see SEC-25.)*
+
 ---
 
 ### SEC-03. No Module Integrity Verification — Unsigned Bytecode
@@ -84,6 +86,8 @@ A malicious actor who can place a modified `.nlm` file in the module path can ex
 1. Add an optional `integrity` section to the module format (e.g., SHA-256 hash of the code sections).
 2. Define a code signing specification for production deployments.
 3. Document the trust model: who is trusted to produce `.nlm` files, and what verification (if any) the VM performs at load time.
+
+*(Fixed 0.8.43 — vm.md § Module integrity: SHA-256 integrity trailer (module format v2), mandatory load-time verification when present, trust model documented. Code signing remains future work.)*
 
 ---
 
@@ -139,6 +143,8 @@ This is a denial-of-service vector: any NL program that parses external input (C
 2. Document that `parse` will crash on invalid input if not wrapped in `try/catch`.
 3. Fix the entry point example in specs.md to demonstrate proper error handling.
 
+*(Fixed 0.8.43 — stdlib.md: `tryParse` added to `system.Int`, `system.Float`, `system.Bool` (naming aligned with `enum.tryFrom`); safety note on `parse`; specs.md entry point example rewritten with `tryParse` + null check.)*
+
 ---
 
 ### SEC-06. Race Conditions — Thread Safety Unspecified
@@ -159,6 +165,8 @@ This is a denial-of-service vector: any NL program that parses external input (C
 2. Document that `Env.set()`/`Env.remove()` from multiple threads is undefined behavior.
 3. Consider adding a `Mutex.withLock(() => void)` convenience method that guarantees unlock.
 4. Plan for volatile/atomic field semantics in a future spec version.
+
+*(Points 1–2 fixed — List/Map in 0.8.34, Env in 0.8.43 (thread safety + security note). Points 3–4 remain future work.)*
 
 ---
 
@@ -198,6 +206,8 @@ This is a denial-of-service vector: any NL program that parses external input (C
 2. Add TLS-related options (at minimum: verify/skip verify flag, with verify as default).
 3. Consider a `system.net.TlsStream` wrapper for `TcpStream` in a future milestone.
 
+*(Point 1 fixed 0.8.43 — stdlib.md § system.net.Http: mandatory certificate validation (chain, expiration, hostname); failure throws IOException; no skip-verify option specified. Points 2–3 remain future work.)*
+
 ---
 
 ### SEC-09. Weak / Non-Cryptographic Randomness
@@ -216,6 +226,8 @@ This is a denial-of-service vector: any NL program that parses external input (C
 1. Add a `system.SecureRandom` class backed by the OS CSPRNG (e.g., `/dev/urandom`, `BCryptGenRandom`).
 2. Specify that `system.Uuid.random()` generates UUID v4 using the CSPRNG.
 3. Document that `system.Random` is **not** suitable for security purposes.
+
+*(Fixed 0.8.43 — stdlib.md: new § system.SecureRandom (nextBytes, nextInt, bias-free bounded nextInt); Uuid.random() specified as v4 from CSPRNG; security note added to system.Random.)*
 
 ---
 
@@ -237,6 +249,8 @@ This is a denial-of-service vector: any NL program that parses external input (C
 1. Document integer overflow behavior in specs.md § Native types (wrapping two's complement for `int`; implementation-defined for `byte`).
 2. Consider adding checked arithmetic methods: `system.Int.addExact(int, int) throws ArithmeticException` (as in Java 8+ `Math.addExact`).
 3. Fix the comparator example to use `a < b ? -1 : (a > b ? 1 : 0)` instead of `a - b`.
+
+*(Points 1 and 3 fixed 0.8.43 — specs.md § Integer overflow documents two's complement wrapping and the comparator anti-pattern; all `a - b` comparator examples replaced with the overflow-safe `a <=> b`. Point 2 (checked arithmetic) remains future work.)*
 
 ---
 
@@ -331,6 +345,8 @@ In a native implementation, incorrect bounds could cause buffer over-reads (info
 
 **Recommendation:** Specify that `read`/`write` **must** throw `IndexOutOfBoundsException` if `offset < 0 || length < 0 || offset + length > buffer.length()`. The bounds check must be performed before any native I/O operation.
 
+*(Fixed 0.8.43 — stdlib.md: bounds checking specified for FileHandle and TcpStream `read`/`write` (overflow-immune check, before any I/O); UdpSocket.receive specified to truncate oversized datagrams and never write past the buffer.)*
+
 ---
 
 ### SEC-17. Readonly Bypass via VM Stack Trace Population
@@ -342,6 +358,8 @@ In a native implementation, incorrect bounds could cause buffer over-reads (info
 **Description:** `Exception` is declared `class readonly`, meaning all fields are immutable after construction. However, the `stackTrace` field is populated by the VM **after** the constructor runs. This requires the VM to bypass readonly enforcement — a violation of the language's own immutability guarantees. If the VM has a mechanism to bypass readonly, that mechanism could be exploited (or trigger implementation bugs) in other contexts.
 
 **Recommendation:** Either (a) populate `stackTrace` inside the constructor via a native call (the constructor is the last place where readonly fields can be assigned), or (b) make `stackTrace` a VM-internal data structure accessed via a native method (`getStackTrace()`) rather than a public field.
+
+*(Fixed 0.8.42 — option (a): vm.md § Stack trace construction and specs.md § Exception class hierarchy now specify that the VM captures and assigns `stackTrace` during the base `Exception` constructor, inside `construct` — no readonly bypass.)*
 
 ---
 
@@ -356,6 +374,8 @@ In a native implementation, incorrect bounds could cause buffer over-reads (info
 - Proxy hijacking (setting `http_proxy` to redirect network traffic).
 
 **Recommendation:** Document the risks. In security-sensitive contexts, implementations **should** consider restricting which environment variables can be modified (or at least warn about `LD_PRELOAD`, `PATH`, etc.).
+
+*(Documented 0.8.43 — stdlib.md § system.Env: security note on secrets exposure and on `PATH`/`LD_PRELOAD` injection combined with `Process.run`.)*
 
 ---
 
@@ -407,6 +427,8 @@ In a native implementation, incorrect bounds could cause buffer over-reads (info
 
 **Recommendation:** Define `instanceof` as a binary expression (`expr instanceof ClassName → bool`) in specs.md.
 
+*(Fixed 0.8.37 — specs.md § Other operators; safe narrowing further strengthened 0.8.41 by smart casts, compiler.md § Type narrowing.)*
+
 ---
 
 ### SEC-23. Regex Without Anchoring or Escaping Utilities
@@ -424,6 +446,8 @@ If `match("user_input", data)` is partial-match, user-controlled patterns may ma
 **Recommendation:**
 1. Add a `Regex.escape(string) : string` method to safely use user input in patterns.
 2. Clarify whether `Regex.match()` is a full-match or partial-match operation.
+
+*(Fixed 0.8.43 — stdlib.md § system.text.Regex: `match`/`matchFirst` specified as **partial match** (anchor with `^…$` for full match, consistent with Grep); `escape(string)` added for literal patterns.)*
 
 ---
 
@@ -481,23 +505,24 @@ Several coherence.md items have direct security implications:
 
 ### Immediate (before 1.0)
 
-1. **SEC-01**: Add security warning for `Process.run(string)` — command injection.
-2. **SEC-02**: Document path traversal risks in file system APIs.
-3. **SEC-05**: Add `tryParseInt`/`tryParseFloat` safe parsing methods.
-4. **SEC-06**: Declare thread safety posture of stdlib collections and Env.
-5. **SEC-10**: Document integer overflow behavior in specs.md.
-6. **SEC-15**: Resolve F2I undefined behavior (align specs.md with vm.md).
-7. **SEC-16**: Specify bounds checking for byte array I/O methods.
-8. **SEC-17**: Resolve readonly bypass for Exception.stackTrace.
+1. ~~**SEC-01**: Add security warning for `Process.run(string)` — command injection.~~ *(fixed 0.8.38)*
+2. ~~**SEC-02**: Document path traversal risks in file system APIs.~~ *(fixed 0.8.43)*
+3. ~~**SEC-05**: Add `tryParseInt`/`tryParseFloat` safe parsing methods.~~ *(fixed 0.8.43 — `tryParse` on Int/Float/Bool)*
+4. ~~**SEC-06**: Declare thread safety posture of stdlib collections and Env.~~ *(fixed — List/Map 0.8.34, Env 0.8.43)*
+5. ~~**SEC-10**: Document integer overflow behavior in specs.md.~~ *(fixed 0.8.43)*
+6. ~~**SEC-15**: Resolve F2I undefined behavior (align specs.md with vm.md).~~ *(fixed — specs.md § Type conversions specifies clamping)*
+7. ~~**SEC-16**: Specify bounds checking for byte array I/O methods.~~ *(fixed 0.8.43)*
+8. ~~**SEC-17**: Resolve readonly bypass for Exception.stackTrace.~~ *(fixed 0.8.42)*
 
 ### Short-term (1.x)
 
-9. **SEC-03**: Module integrity (hash in module format).
-10. **SEC-04**: StackOverflowException + configurable resource limits.
-11. **SEC-08**: Specify TLS certificate validation requirements.
-12. **SEC-09**: Add `system.SecureRandom` CSPRNG.
+9. ~~**SEC-03**: Module integrity (hash in module format).~~ *(fixed 0.8.43 — SHA-256 trailer; code signing remains future work)*
+10. **SEC-04**: StackOverflowException *(done)* + configurable resource limits *(open)*.
+11. ~~**SEC-08**: Specify TLS certificate validation requirements.~~ *(fixed 0.8.43)*
+12. ~~**SEC-09**: Add `system.SecureRandom` CSPRNG.~~ *(fixed 0.8.43)*
 13. ~~**SEC-11**: Specify IOException on read/write after close.~~ *(fixed 0.8.23)*
 14. **SEC-12**: Design try-with-resources or RAII mechanism.
+15. ~~**SEC-23**: Regex partial/full match semantics + `Regex.escape`.~~ *(fixed 0.8.43)*
 
 ### Long-term (2.x+)
 

@@ -35,6 +35,7 @@ write concise code without sacrificing type safety or runtime guarantees.
     * [Self and type keywords](#self-and-type-keywords)
     * [Super keyword](#super-keyword)
     * [Constructors and Destructors](#constructors-and-destructors)
+        * [Constructor chaining (`this(...)`)](#constructor-chaining-this)
     * [Class methods](#class-methods)
     * [Parameter passing semantics](#parameter-passing-semantics)
     * [Named parameters](#named-parameters)
@@ -45,6 +46,7 @@ write concise code without sacrificing type safety or runtime guarantees.
         * [Bounded type parameters](#bounded-type-parameters)
     * [Template methods](#template-methods)
     * [Extends, Implements](#extends-implements)
+        * [Interface inheritance](#interface-inheritance)
     * [Abstract classes and methods](#abstract-classes-and-methods)
     * [Final classes and methods](#final-classes-and-methods)
     * [Virtual method dispatch](#virtual-method-dispatch)
@@ -62,9 +64,11 @@ write concise code without sacrificing type safety or runtime guarantees.
 * [Anonymous Functions](#anonymous-functions)
     * [Typedef advanced usage](#typedef-advanced-usage)
 * [Operators](#operators)
+    * [Operator precedence](#operator-precedence)
     * [String concatenation](#string-concatenation)
     * [Conditional operators](#conditional-operators)
 * [Operator Overloading](#operator-overloading)
+    * [Overloadable operators](#overloadable-operators)
 * [Exceptions](#exceptions)
     * [Exception class hierarchy](#exception-class-hierarchy)
     * [Declaring exceptions](#declaring-exceptions)
@@ -167,7 +171,7 @@ class Application {
 | Control flow             | [`if`][1], [`else`][1], [`while`][2], [`for`][2], [`break`][2], [`continue`][2], [`switch`][3], [`case`][3], [`match`][3]             |
 | Types and literals       | [`auto`][4], [`const`][5], [`ref`][23], [`void`][6], `true`, `false`, [`null`][7], `return`                                      |
 | Reserved                 | `undefined`                                                                                                          |
-| Object-oriented          | [`class`][18], `interface`, [`namespace`][8], [`extends`][9], [`implements`][9], [`super`][21], [`Self`][10], [`type`][10], [`use`][22], [`as`][22], [`instanceof`](#other-operators) |
+| Object-oriented          | [`class`][18], `interface`, [`namespace`][8], [`extends`][9], [`implements`][9], [`this`][10], [`super`][21], [`Self`][10], [`type`][10], [`use`][22], [`as`][22], [`instanceof`](#other-operators) |
 | Visibility and modifiers | [`private`][19], [`public`][19], [`protected`][19], [`static`][5], [`final`][24], [`abstract`][25], [`readonly`][11], [`nodiscard`][20]       |
 | Templates and generics   | [`template`][12], [`operator`][13]                                                                                   |
 | Exceptions               | [`try`][14], [`catch`][14], [`finally`][14], [`throw`][15], [`throws`][15]                                           |
@@ -227,6 +231,21 @@ Scientific notation (e.g. `1e10`, `3.14e-2`) is **not supported**. A numeric lit
 NL does not provide byte literal syntax. To obtain a byte value, use an explicit cast: `(byte) intExpr`. The expression must evaluate to an integer; values outside 0–255 are treated as in [int → byte conversion](#type-conversions-and-casting) (low-order bits; overflow implementation-defined).
 
 A **character** is represented as a `string` of length 1 (e.g. via `system.String.charAt`). A dedicated `char` type may be added to the spec in a future version; see [Planned](#planned).
+
+#### Integer overflow
+
+`int` is a **64-bit signed two's complement** integer (−2⁶³ to 2⁶³−1; see [vm.md § Value representation](vm.md#value-representation)). Arithmetic on `int` (`+`, `-`, `*`) **wraps silently on overflow** (two's complement wrap-around) — no exception is thrown and no error is reported. Division and modulo by zero throw `ArithmeticException`; `float` → `int` casts are clamped (see [Type conversions and casting](#type-conversions-and-casting)); `int` → `byte` casts keep the low-order bits.
+
+Developers must account for wrapping when computing sizes, bounds, or comparisons on untrusted input:
+
+```nl
+// Anti-pattern: subtraction-based comparator — overflows when a and b have
+// opposite signs and large magnitude (e.g. a = INT_MAX, b = -1)
+numbers.sort((int a, int b) => a - b);      // incorrect ordering on overflow
+
+// Correct: use the spaceship operator, which never overflows
+numbers.sort((int a, int b) => a <=> b);
+```
 
 See [Arrays](#arrays) for creation, access, and built-in methods.
 
@@ -318,7 +337,7 @@ int[] sub = numbers.slice(1, 4);               // [2, 3, 4]
 int[] doubled = numbers.map((int n) => n * 2); // [2, 4, 6, 8, 10]
 int[] evens = numbers.filter((int n) => n % 2 == 0); // [2, 4]
 numbers.forEach((int n) => { system.Out.print(n); });
-numbers.sort((int a, int b) => a - b);
+numbers.sort((int a, int b) => a <=> b);       // spaceship: safe, no overflow
 auto found = numbers.find((int n) => n > 3);   // 4 or null
 ```
 
@@ -683,6 +702,33 @@ NL provides three related mechanisms so you don't have to repeat the class name:
 
 Keeping both `Self` and `type` makes the intent explicit: `Self` means mutation and return of the same instance; `type` means creation of a new instance. The same keyword `type` is used in templates to declare type parameters; there is no conflict as the contexts are different.
 
+#### `Self` in interfaces
+
+Inside an **interface body**, `Self` denotes **the implementing class**. It may appear in return types and
+parameter types of interface method declarations (e.g. `Cloneable` declares `public Self clone()`;
+`ValueEquatable` declares `bool valueEquals(const Self|null other)`).
+
+Semantics — for each class `C` that implements the interface, the interface member signature is instantiated
+with `Self = C`:
+
+- `Cloneable.clone()` implemented by `Point` has the effective signature `Point clone()` — a **covariant return
+  type**. Callers holding a `Point` get a `Point` back, without casting.
+- `ValueEquatable.valueEquals(const Self|null other)` implemented by `Point` has the effective signature
+  `bool valueEquals(const Point|null other)`.
+
+Rules:
+
+- The implementing method **must** also write `Self` in the positions where the interface uses it; the compiler
+  resolves it to the implementing class. Writing the class name directly (e.g. `Point clone()`) is also accepted,
+  since it is exactly what `Self` resolves to.
+- `Self` resolution happens at **compile time**, per implementing class — like a built-in one-parameter template.
+  No `Self` metadata survives into bytecode.
+- **Inheritance**: if `D extends C` and `C` implements the interface, the implementation inherited by `D` keeps
+  `Self = C` (the class that provided the implementation). If `D` must return `D` (e.g. a `clone()` producing a
+  `D`), it overrides the method; the override's `Self` resolves to `D`, which is a valid covariant return.
+- Inside an interface, `Self` cannot be instantiated (`new Self(...)` is invalid in an interface body — there is
+  no constructor contract in interfaces).
+
 ### Super keyword
 
 The `super` keyword provides access to members of the parent class in inheritance hierarchies. It allows derived classes to call methods, access properties, or invoke constructors from their base class, enabling proper code reuse and method overriding patterns.
@@ -745,6 +791,50 @@ Usage:
 Contact john = new Contact("Doe", "John");
 Contact empty = new Contact();
 ```
+
+#### Constructor chaining (`this(...)`)
+
+A constructor may delegate to another constructor of the **same class** by calling `this(args)`, avoiding
+duplicated initialization logic across overloads (as in Java).
+
+```nl
+class Contact
+{
+    public string lastName;
+    public string firstName;
+    public int age;
+
+    public construct(string lastName, string firstName, int age) {
+        this.lastName = lastName;
+        this.firstName = firstName;
+        this.age = age;
+    }
+
+    public construct(string lastName, string firstName) {
+        this(lastName, firstName, 0);   // delegate to the 3-argument constructor
+    }
+
+    public construct() {
+        this("", "");                    // delegate to the 2-argument constructor
+    }
+}
+```
+
+Rules:
+
+- A constructor may contain **at most one delegation call** — either `this(...)` or `super(...)`, never both —
+  and it must be the **first statement** of the constructor body (E045).
+- Delegation chains must not be **cyclic** (`construct(a)` → `construct(b)` → `construct(a)` is rejected, E046).
+- The target constructor is selected by overload resolution on the argument types, like a regular call.
+- **Definite assignment**: the delegating constructor is credited with all property initializations performed by
+  the target constructor (see [compiler.md § Class properties](compiler.md#class-properties)). Statements after
+  `this(...)` may complete or adjust the initialization.
+- When a constructor delegates with `this(...)`, the parent constructor is invoked by the **end of the chain**
+  (the final constructor of the chain calls `super(...)` explicitly or implicitly); the delegating constructor
+  must not call `super(...)` itself.
+
+See [compiler.md § Constructor delegation](compiler.md#constructor-delegation) for the compile-time checks and
+[vm.md § Constructors](vm.md#constructors) for the bytecode pattern.
 
 #### Destructor
 
@@ -1087,6 +1177,21 @@ system.Out.print(obj.value); // OK: 1
 obj.value = 12; // Error: Cannot modify a property of a readonly class.
 ```
 
+**Combining with `abstract` and `final`.** `readonly` is **orthogonal** to the inheritance modifiers: a class may
+be `abstract class readonly` (e.g. an abstract base for immutable value objects) or `final class readonly`. In an
+abstract readonly class, subclass constructors may assign inherited properties through `super(...)` — assignment
+inside any `construct` of the chain is allowed, as usual. `abstract` and `final` remain mutually exclusive on a
+class (E049), exactly as on methods.
+
+**Modifier order.** The canonical order is: `[abstract | final] class [readonly] Name`. The inheritance modifier
+(`abstract` or `final`) precedes `class`; `readonly` follows `class`.
+
+```nl
+abstract class readonly Shape2D { /* ... */ }
+final class readonly Money { /* ... */ }
+class readonly Exception { /* ... */ }       // neither abstract nor final
+```
+
 #### Property
 
 ```nl
@@ -1339,6 +1444,38 @@ class Point implements Stringable, Cloneable, ValueEquatable {
 }
 ```
 
+#### Interface inheritance
+
+An interface may extend one or more interfaces using `extends` (comma-separated). The extending interface inherits
+all method declarations of its parents.
+
+```nl
+interface Disposable {
+    public void dispose();
+}
+
+interface Closeable extends Disposable {
+    public void close();
+}
+
+interface Resource extends Closeable, Stringable {
+    public string name() const;
+}
+```
+
+Rules:
+
+- An interface may extend **any number** of interfaces (unlike classes, which extend at most one class).
+- An interface **cannot** extend a class, and a class **cannot** extend an interface (a class *implements* interfaces).
+- A class implementing an interface must implement **all** methods, including those inherited from extended
+  interfaces (e.g. a class implementing `Closeable` must provide both `close()` and `dispose()`).
+- Extended interfaces are supertypes: an implementing class can be upcast to any interface in the hierarchy, and
+  `instanceof` returns `true` for all of them.
+- If the same method declaration is inherited from several parents (diamond), the declarations merge when they have
+  the identical signature **and** return type. Inheriting two declarations with the same name and parameter types
+  but different return types is a compile-time error (E041, same rule as
+  [duplicate definitions](compiler.md#duplicate-definitions)).
+
 #### Stringable interface
 
 The **Stringable** interface is the standard contract for converting reference types to string. A class that implements Stringable must provide a method `string toString() const`. The `const` modifier enforces read-only semantics: the method must not modify the object's state. The interface does **not** declare `throws`; implementations that need to signal failure may throw runtime exceptions (e.g. `IllegalStateException`), which do not require declaration.
@@ -1410,8 +1547,10 @@ class Derived extends Base {
 
 Rules:
 - A `final` class cannot have abstract methods.
-- `final` and `abstract` are mutually exclusive on a method (a method cannot be both).
+- `final` and `abstract` are mutually exclusive, on a method **and** on a class (E049).
 - Private methods are implicitly final (they are not visible to subclasses and thus cannot be overridden).
+- `final` combines freely with `readonly` (`final class readonly Money`); see [Readonly](#readonly) for modifier
+  combinations and ordering.
 
 ### Virtual method dispatch
 
@@ -1650,6 +1789,39 @@ string result = match(value) {
 };
 ```
 
+#### Match exhaustiveness
+
+A `match` expression must be **exhaustive at compile time** — every possible value of the subject must be covered
+by an arm. The compiler rejects non-exhaustive `match` expressions (E047, see
+[compiler.md § Match exhaustiveness](compiler.md#match-exhaustiveness)):
+
+| Subject type | Exhaustive when |
+|--------------|------------------|
+| Enum | Every enum case has an arm, **or** a `default` arm is present. When all cases are listed, `default` is optional (an extra `default` remains allowed as a defensive arm). |
+| `bool` | Both `true` and `false` have arms, or a `default` arm is present. |
+| `int`, `string`, other types | A `default` arm is **required** (the value domain is unbounded). |
+
+Because exhaustiveness is verified at compile time, a `match` expression **never fails at runtime**: exactly one
+arm is always selected. Arms are tested in declaration order; `default` matches anything and must be the last arm.
+Two arms with the same constant value are a compile-time error (the second arm would be unreachable, E047).
+
+```nl
+enum Color { Red, Green, Blue }
+
+string name = match(color) {
+    Color.Red: "red",
+    Color.Green: "green",
+    Color.Blue: "blue",
+    // OK — all enum cases covered, no default required
+};
+
+string label = match(code) {
+    200: "ok",
+    404: "not found",
+    // Error E047 — subject is int, default arm required
+};
+```
+
 ## Anonymous Functions
 
 NL supports anonymous functions (also called lambdas or closures) that allow you to define inline functions without explicitly naming them. Anonymous functions are first-class citizens and can be assigned to variables, passed as arguments, or returned from other functions.
@@ -1789,8 +1961,8 @@ auto evens = numbers.filter((int n) => n % 2 == 0);
 // ForEach operation
 numbers.forEach((int n) => { system.Out.print(n); });
 
-// Sort with custom comparator
-numbers.sort((int a, int b) => a - b);
+// Sort with custom comparator (spaceship: safe, no overflow)
+numbers.sort((int a, int b) => a <=> b);
 
 // Find operation
 auto found = numbers.find((int n) => n > 3);
@@ -1806,6 +1978,27 @@ auto add = (int a, int b) => a + b;
 
 // Type is deduced as (string) => string
 auto greet = (string name) => "Hello, " + name;
+```
+
+#### Return type deduction rules
+
+When the return type of an anonymous function is not written explicitly, it is deduced as follows:
+
+1. **Single-expression body** (`(int a, int b) => a + b`): the return type is the static type of the expression.
+2. **Block body** (`=> { ... }`): the return type is the [common result type](#common-result-type) of the
+   expressions of all `return` statements in the body. With NL's union types this always succeeds — unrelated
+   return types produce a union (e.g. one path returns `int`, another `string` → deduced `int|string`).
+3. **No `return` statement**, or only bare `return;`: the return type is `void`.
+4. Mixing bare `return;` and `return expr;` in the same body is a **compile-time error**.
+5. **Target typing**: when the anonymous function is directly assigned to an explicitly typed function type
+   (declaration, `typedef`, or a typed parameter such as `(int) => int transformer`), the expected return type
+   takes precedence: the body is checked against it, and every returned expression must be assignable to it.
+
+```nl
+auto f = (bool b) => { if (b) { return 1; } return 2; };      // (bool) => int
+auto g = (bool b) => { if (b) { return 1; } return "no"; };   // (bool) => int|string
+auto h = (int n) => { system.Out.print(n); };                  // (int) => void
+(int) => float k = (int n) => n;                               // OK — target typing: int widens to float
 ```
 
 Anonymous functions provide a powerful and expressive way to write concise, functional-style code while maintaining NL's emphasis on type safety and compile-time checking.
@@ -1932,6 +2125,36 @@ NL provides a comprehensive set of operators for arithmetic, comparison, logical
 
 See also [operator overloading section](#operator-overloading).
 
+### Operator precedence
+
+The following table lists **all** operators from highest precedence (binds tightest, evaluated first) to lowest.
+Operators on the same level have equal precedence and are grouped by their associativity. Parentheses `( )` always
+override precedence.
+
+| Level | Category | Operators | Associativity |
+|-------|----------|-----------|---------------|
+| 1 | Primary / postfix | `.` (member access), `[]` (index), `()` (call), postfix `++` `--` | Left |
+| 2 | Unary / prefix | `!`, unary `-`, prefix `++` `--`, `(T)` (cast), `new` | Right |
+| 3 | Multiplicative | `*` `/` `%` | Left |
+| 4 | Additive | `+` `-` | Left |
+| 5 | Three-way comparison | `<=>` | Left |
+| 6 | Relational / type test | `<` `>` `<=` `>=` `instanceof` | Left |
+| 7 | Equality | `==` `!=` | Left |
+| 8 | Logical AND | `&&` | Left |
+| 9 | Logical OR | `\|\|` | Left |
+| 10 | Ternary | `? :` | Right |
+| 11 | Coalescing | `??` `?:` (elvis) | Left |
+| 12 | Assignment | `=` `+=` `-=` `*=` `/=` `%=` | Right |
+
+Consequences worth noting:
+
+- `a + b * c` parses as `a + (b * c)` (multiplicative binds tighter than additive).
+- `a < b == c < d` parses as `(a < b) == (c < d)` (relational binds tighter than equality).
+- `a ?? b ? c : d` parses as `a ?? (b ? c : d)` — the ternary binds tighter than `??` / `?:`. When mixing
+  conditional operators, use parentheses to clarify intent (see
+  [Operator precedence and usage](#operator-precedence-and-usage)).
+- `x = y = z` parses as `x = (y = z)` (assignment is right-associative).
+
 ### Arithmetic operators
 
 - `+` (addition), `-` (subtraction), `*` (multiplication), `/` (division), `%` (modulo)
@@ -1992,10 +2215,37 @@ string message = isLoggedIn ? "Welcome back" : "Please log in";
 
 The ternary operator has the form: `condition ? value_if_true : value_if_false`
 
-- The condition is evaluated first
+- The condition is evaluated first, and must be of type `bool`
 - If the condition is `true`, the expression evaluates to `value_if_true`
 - If the condition is `false`, the expression evaluates to `value_if_false`
-- Both branches must have compatible types (the compiler ensures type safety)
+- The static type of the expression is the [common result type](#common-result-type) of the two branches
+
+##### Common result type
+
+The **common result type** of two expression types `T1` and `T2` is used by the ternary operator, the nullish
+coalescing operator `??`, the elvis operator `?:`, and by
+[anonymous function return type deduction](#type-deduction). It is computed as follows, first rule that applies wins:
+
+| # | Rule | Result |
+|---|------|--------|
+| 1 | `T1` and `T2` are identical | `T1` |
+| 2 | One type converts **implicitly** to the other (numeric widening `byte` → `int` → `float`; subclass → superclass or implemented interface; `T` → `T\|null`) | The wider / target type |
+| 3 | One branch is the `null` literal, the other has type `T` | `T\|null` |
+| 4 | Both types are reference types with a **common superclass** other than implicit root (nearest common ancestor `C`) | `C` |
+| 5 | Otherwise | The union type `T1\|T2` |
+
+Examples:
+
+```nl
+auto a = cond ? 1 : 2;          // int
+auto b = cond ? 1 : 2.5;        // float (int widens to float)
+auto c = cond ? "x" : null;     // string|null
+auto d = cond ? dog : animal;   // Animal (Dog upcast; rule 2)
+auto e = cond ? 42 : "n/a";     // int|string (rule 5 — union)
+```
+
+Since NL has first-class union types, mixing unrelated types is **not** an error: the result is simply the union,
+which must then be [narrowed](compiler.md#type-narrowing-smart-casts) before use as a specific type.
 
 #### Nullish coalescing operator
 
@@ -2018,6 +2268,10 @@ The nullish coalescing operator has the form: `value ?? default_value`
 - If `value` is not `null`, the expression evaluates to `value`
 - Only `null` triggers the default value; `false` or `0` do not
 - Useful for providing fallback values when dealing with nullable types
+- **Result type**: the left operand's type must include `null` in its union. The result type is the
+  [common result type](#common-result-type) of the left operand's type **without `null`** and the right operand's
+  type. E.g. `string|null ?? string` → `string`; `int|null ?? string` → `int|string`. If the right operand's type
+  itself includes `null`, the result keeps `null` (e.g. `string|null ?? string|null` → `string|null`).
 
 #### Elvis operator
 
@@ -2038,13 +2292,15 @@ The elvis operator has the form: `value ?: default_value`
 
 - If `value` is falsy (`false`, `null`, or `0`), the expression evaluates to `default_value`
 - If `value` is truthy (any other value), the expression evaluates to `value`
-- Both operands must have compatible types; the result type is the common type of the two (or the union type if they differ)
+- **Result type**: the [common result type](#common-result-type) of the left operand's type **without `null`**
+  (a returned left value is never `null`, since `null` is falsy) and the right operand's type. E.g.
+  `int ?: int` → `int`; `string|null ?: string` → `string`; `int ?: string` → `int|string`.
 - More permissive than nullish coalescing as it handles multiple falsy conditions
 - Useful for providing defaults when dealing with values that might be zero, false, or null
 
 #### Operator precedence and usage
 
-Conditional operators have different precedence levels:
+Conditional operators have different precedence levels (see the full [operator precedence table](#operator-precedence)):
 
 - Ternary operator `? :` has lower precedence than most operators
 - Nullish coalescing `??` has lower precedence than ternary but higher than assignment
@@ -2067,7 +2323,9 @@ string message = user != null
 
 ## Operator Overloading
 
-Classes can overload operators to provide custom behavior for built-in operators such as `+`, `-`, `*`, `/`, `==`, etc.
+Classes can overload operators to provide custom behavior for built-in operators such as `+`, `-`, `*`, `/`, `<`, `<=>`, etc.
+(see [Overloadable operators](#overloadable-operators) for the exhaustive list — equality `==`/`!=` is **not**
+overloadable; use [ValueEquatable](#valueequatable-interface) for structural equality).
 Operator overloading allows objects to be used with natural syntax while maintaining type safety. Binary operators
 like `+` typically create and return a new object without modifying the operands, while compound assignment operators
 like `+=` modify the left-hand operand and return a reference to it. Operators can be overloaded with different
@@ -2120,6 +2378,42 @@ p3 += new Vector2(2, 3);
 system.Out.print(p3.x); // 7 (5 + 2)
 system.Out.print(p3.y); // 10 (7 + 3)
 ```
+
+### Overloadable operators
+
+The following table is the **exhaustive** list of overloadable operators, with the required signature shapes.
+`T` stands for the parameter type of the overload; a class may provide several overloads of the same operator
+with different parameter types (as `Vector2` above overloads `operator+` for `Vector2` and `int`).
+
+| Operators | Form | Required signature | Semantics |
+|-----------|------|--------------------|-----------|
+| `+` `-` `*` `/` `%` | Binary | `public type operator+(const T other) const` | Returns a **new** instance; must not modify the operands. |
+| `+=` `-=` `*=` `/=` `%=` | Compound assignment | `public Self operator+=(const T other)` | Mutates `this` and returns it. |
+| `<` `>` `<=` `>=` | Binary comparison | `public bool operator<(const T other) const` | Must be `const`. Each comparison operator is overloaded independently. |
+| `<=>` | Three-way comparison | `public int operator<=>(const T other) const` | Returns negative / `0` / positive. Overloading `<=>` does **not** implicitly derive `<`, `>`, `<=`, `>=`. |
+| `-` (unary) | Unary | `public type operator-() const` | Returns a new negated instance. |
+| `!` | Unary | `public bool operator!() const` | Logical negation. |
+| `++` `--` | Prefix / postfix | `public Self operator++()` | Mutates `this` and returns it. See postfix note below. |
+
+Rules:
+
+- Operator overloads are **instance methods**; they cannot be `static`.
+- Binary, comparison, and unary-`-`/`!` overloads must be `const` (they must not mutate the operands); compound
+  assignment and `++`/`--` overloads mutate the receiver and return `Self`.
+- **Postfix note:** for an overloaded `++`/`--`, the prefix and postfix forms invoke the **same** method, and the
+  postfix expression evaluates to the (mutated) object reference — unlike primitives, where postfix yields the
+  original value. Rely on the statement form (`x++;`) rather than the expression value for overloaded types.
+
+**Not overloadable:**
+
+| Operator | Reason |
+|----------|--------|
+| `==` `!=` | Always **reference identity** for objects (value equality for primitives and `string`). For structural equality, implement [ValueEquatable](#valueequatable-interface). |
+| `&&` `\|\|` | Short-circuit semantics must remain predictable. |
+| `=` | Assignment always rebinds the variable. |
+| `? :` `??` `?:` | Built-in conditional semantics. |
+| `.` `new` `(T)` cast `instanceof` | Core language operations. |
+| `[]` (subscript) | Reserved to arrays and native collections. May be considered in a future version (see [Planned](#planned)). |
 
 ## Exceptions
 
@@ -2188,6 +2482,12 @@ class readonly InterruptedException extends Exception {
 ```
 
 All exceptions must extend `Exception`. Runtime exceptions (subclasses of `RuntimeException`) represent programming errors and do not require declaration in method signatures. Checked exceptions (direct subclasses of `Exception` or custom exceptions) must be declared using `throws`. The standard library uses the exceptions above; see [stdlib.md](stdlib.md) for which methods throw which exceptions.
+
+**Stack trace capture.** The `stackTrace` field is assigned **during the execution of the base `Exception`
+constructor**: when `construct(string what)` runs (directly or via `super(...)` from a subclass), the VM natively
+captures the current call stack and assigns it to `stackTrace` before the constructor returns. This respects the
+`readonly` rule — the field is assigned inside `construct`, like any other readonly property — and requires **no
+readonly bypass** by the VM (see [vm.md § Stack trace construction](vm.md#stack-trace-construction)).
 
 ### Declaring exceptions
 
@@ -2350,6 +2650,25 @@ finally {
 }
 ```
 
+**Catch clause ordering.** Catch clauses are tested **in declaration order**; the first clause whose type matches
+the thrown exception (same class or superclass) wins. A catch clause is **unreachable** — and rejected at compile
+time (E048) — if an earlier clause of the same `try` already catches the same exception type or a superclass of it.
+In practice: order catch clauses from the most specific to the most general.
+
+```nl
+try {
+    doSomethingRisky();
+}
+catch (Exception ex) {
+    // catches everything
+}
+catch (CustomException ex) {
+    // Error E048 — unreachable: Exception above already catches CustomException
+}
+```
+
+See [compiler.md § Unreachable catch clauses](compiler.md#unreachable-catch-clauses).
+
 ### Constructors with exceptions
 
 Constructors can also declare `throws`. When creating an object with `new`, the exception must be handled:
@@ -2487,8 +2806,14 @@ class Calculator {
         }
         
         string operation = args[1];
-        int a = system.Int.parse(args[2]);
-        int b = system.Int.parse(args[3]);
+        // Safe parsing: tryParse returns null on invalid input instead of
+        // throwing NumberFormatException (see stdlib.md § system.Int)
+        int|null a = system.Int.tryParse(args[2]);
+        int|null b = system.Int.tryParse(args[3]);
+        if (a == null || b == null) {
+            system.Out.print("Invalid number");
+            return 1;
+        }
         
         int result = 0;
         if (operation == "add") {
@@ -2517,6 +2842,8 @@ The following features may be added to the spec in future versions:
 - **RAII / try-with-resources** — No mechanism for automatic resource cleanup at scope exit (like Java's `try-with-resources`, C#'s `using`, or C++ RAII) is specified for now. The only cleanup mechanism is the destructor, whose timing is implementation-defined. A dedicated construct may be considered in a future version.
 
 - **Parsable interface** — A template interface `Parsable<T>` with a static abstract method `static T parse(string s)` would unify the parsing contract of `system.Int`, `system.Float`, and `system.Bool`. This requires support for static abstract interface members (similar to C# 11), enabling generic code to call `T.parse(s)` when `T` is constrained by `Parsable<T>`.
+
+- **Subscript operator overloading (`operator[]`)** — Allowing classes to overload `[]` (indexed get/set) would benefit collection-like types. Currently `[]` is reserved to arrays and native collections (see [Overloadable operators](#overloadable-operators)).
 
 
 [1]: #conditionals

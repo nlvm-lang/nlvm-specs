@@ -1,0 +1,54 @@
+---
+title: "Type narrowing (smart casts) — null check and instanceof narrow union types"
+file_separator: "#NLFILE"
+compile_only: true
+---
+
+#NLFILE compile/narrowing/Animal.nl
+namespace compile.narrowing;
+interface Animal {
+	public string name() const;
+}
+
+#NLFILE compile/narrowing/Dog.nl
+namespace compile.narrowing;
+class Dog implements Animal {
+	public construct() {}
+	public string name() const { return "dog"; }
+	public string bark() const { return "woof"; }
+}
+
+#NLFILE compile/narrowing/Narrowing.nl
+namespace compile.narrowing;
+use compile.narrowing.Animal;
+use compile.narrowing.Dog;
+class Narrowing {
+	public static string describe(string|null s) {
+		// branch narrowing: s is string inside the if
+		if (s != null) {
+			return s.toUpperCase();
+		}
+		return "null";
+	}
+
+	public static int early(string|null s) {
+		// early-exit narrowing: s is string after the if
+		if (s == null) {
+			return -1;
+		}
+		return s.length();
+	}
+
+	public static bool chained(string|null s) {
+		// && narrowing: right operand sees s as string
+		return s != null && s.length() > 0;
+	}
+
+	public static string typeTest(const Animal a) {
+		// instanceof narrowing: a is Dog in the true branch (no cast needed)
+		if (a instanceof Dog) {
+			return a.bark();
+		}
+		return a.name();
+	}
+}

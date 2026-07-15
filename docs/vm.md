@@ -12,6 +12,7 @@ the compiler verifies*; this document defines *how* compiled code is represented
 * [Module format](#module-format)
     * [Constant pool](#constant-pool)
     * [Type descriptors](#type-descriptors)
+    * [Module integrity](#module-integrity)
     * [Class descriptor](#class-descriptor)
     * [Field descriptor](#field-descriptor)
     * [Method descriptor](#method-descriptor)
@@ -134,7 +135,7 @@ A compiled module contains the following sections in order. Multi-byte integers 
 | Offset | Field | Type | Description |
 |--------|-------|------|-------------|
 | 0 | `magic` | `u32` | `0x4E4C4D00` (ASCII `NLM\0`). |
-| 4 | `version` | `u16` | Module format version (currently `1`). |
+| 4 | `version` | `u16` | Module format version (currently `2`; version 2 adds the line-number table and the integrity trailer). |
 | 6 | `constant_pool_count` | `u16` | Number of entries in the constant pool (1-indexed; entry 0 is unused). |
 | 8 | `constant_pool` | varies | Constant pool entries (see below). |
 | … | `this_class` | `u16` | Constant pool index of a `CLASS` entry for the class defined in this module. |
@@ -146,6 +147,8 @@ A compiled module contains the following sections in order. Multi-byte integers 
 | … | `fields` | varies | Field descriptors (see below). |
 | … | `methods_count` | `u16` | Number of methods. |
 | … | `methods` | varies | Method descriptors (see below). |
+| … | `hash_algo` | `u8` | Integrity trailer: hash algorithm (`0` = none, `1` = SHA-256). See [Module integrity](#module-integrity). |
+| … | `hash` | `u8[]` | Present only if `hash_algo ≠ 0`. Hash of all preceding bytes of the module (32 bytes for SHA-256). |
 
 Class flag bits:
 
@@ -154,6 +157,10 @@ Class flag bits:
 | 0 | `READONLY` | All instance properties are immutable after construction (`class readonly`). |
 | 1 | `INTERFACE` | This module defines an interface, not a class. |
 | 2 | `ENUM` | This module defines an enum. |
+| 3 | `ABSTRACT` | Abstract class (`abstract class`). The VM **must** reject `NEW` targeting a class with this flag (verification error at link time; if reached at runtime, the VM aborts execution with an error). |
+| 4 | `FINAL` | Final class (`final class`). At link time, the VM **must** reject any module whose `super_class` refers to a class with this flag. |
+
+`ABSTRACT` and `FINAL` are mutually exclusive (the compiler enforces E049; the loader rejects a module with both bits set). For a module with the `INTERFACE` flag, the `interfaces` list holds the **extended** interfaces (`interface A extends B, C`; see [specs.md § Interface inheritance](specs.md#interface-inheritance)) and `super_class` is `0`.
 
 ### Constant pool
 
@@ -186,6 +193,30 @@ Type descriptors are strings stored in the constant pool. They encode types in a
 | Union | Types joined by `"\|"`, e.g. `"string\|null"`, `"int\|string\|null"` |
 | Null alone | `"null"` |
 | Method | `"(" params ") -> " return_type`, e.g. `"(int, string) -> void"` |
+
+### Module integrity
+
+Every module ends with an **integrity trailer**: a `hash_algo` byte followed, when `hash_algo ≠ 0`, by the hash
+of **all preceding bytes** of the module (from the magic number up to and including the last method descriptor).
+
+| `hash_algo` | Algorithm | Hash size |
+|-------------|-----------|-----------|
+| `0` | None (no hash follows) | 0 bytes |
+| `1` | SHA-256 | 32 bytes |
+
+Rules:
+
+- Compilers **should** emit a SHA-256 hash by default (`hash_algo = 1`).
+- When a hash is present, the VM **must** recompute and verify it at load time; on mismatch, the module is
+  rejected and the VM refuses to run (load error, non-zero exit).
+- `hash_algo = 0` is allowed (e.g. for fast development builds); loading unhashed modules is permitted but an
+  implementation may provide a strict mode that rejects them.
+
+**Trust model.** The hash detects **corruption and accidental tampering**; it does not authenticate the module's
+origin (an attacker who can replace the module can recompute the hash). `.nlm` files must be treated as trusted
+code, with the same care as native executables: the directories on the module path (`--module-path`) must not be
+writable by untrusted users. Digital signatures (origin authentication) are out of scope for this version and may
+be specified later.
 
 ### Class descriptor
 
@@ -229,6 +260,8 @@ Each method is encoded as:
 | `code` | `u8[]` | Bytecode instructions. |
 | `exception_table_count` | `u16` | Number of exception table entries. |
 | `exception_table` | varies | Exception table entries (see [Exception handling](#exception-handling)). |
+| `line_table_count` | `u16` | Number of line-number table entries (`0` when no debug info is emitted). |
+| `line_table` | varies | Line-number table entries (see below). |
 
 Flag bits:
 
@@ -242,6 +275,26 @@ Flag bits:
 | 5 | `NODISCARD` | Caller must use return value. |
 | 6 | `CONSTRUCTOR` | This is a `construct` method. |
 | 7 | `DESTRUCTOR` | This is a `destruct` method. |
+| 8 | `ABSTRACT` | Abstract method (no body). |
+| 9 | `FINAL` | Final method; cannot be overridden. At link time, the VM **must** reject a subclass that overrides a vtable slot occupied by a method with this flag. |
+
+**Abstract method representation.** A method with the `ABSTRACT` flag has **no code**: `max_locals = 0`,
+`max_stack = 0`, `code_length = 0`, an empty `code` array, `exception_table_count = 0`, and
+`line_table_count = 0`. The loader **must** reject a module containing an `ABSTRACT` method with
+`code_length ≠ 0`, and conversely a non-abstract, non-interface method with `code_length = 0`. Interface method
+declarations are encoded the same way (implicitly abstract). `ABSTRACT` and `FINAL` are mutually exclusive.
+
+**Line-number table.** Optional debug information mapping bytecode offsets to source lines, used for
+[stack trace construction](#stack-trace-construction). Each entry is:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_pc` | `u16` | First bytecode offset covered by this entry. |
+| `line` | `u32` | 1-based source line number. |
+
+Entries are sorted by ascending `start_pc`; an entry covers the offsets from its `start_pc` up to (excluding) the
+next entry's `start_pc` (or the end of the code array for the last entry). Compilers **should** emit the table by
+default; a stripped build may omit it (`line_table_count = 0`), in which case stack trace lines are reported as `0`.
 
 ---
 
@@ -471,6 +524,16 @@ Branch offsets are relative to the address of the **opcode** of the branch instr
 | `GOTO` | `i16` offset | `[… → …]` | Unconditional branch. |
 | `GOTO_W` | `i32` offset | `[… → …]` | Wide unconditional branch (for methods with code > 32 KiB). |
 
+> **Wide conditional branches.** There are deliberately no `IF_TRUE_W` / `IF_FALSE_W` opcodes. When a conditional
+> branch target is out of `i16` range (beyond ±32 KiB), the compiler **must** emit the inverted condition jumping
+> over a wide unconditional branch:
+>
+> ```
+> IF_FALSE   NEXT        // inverted condition, short offset
+> GOTO_W     FAR_TARGET  // wide jump to the real target
+> NEXT:
+> ```
+
 ### Object operations
 
 | Name | Operands | Stack | Description |
@@ -575,7 +638,11 @@ INVOKE_SPECIAL <MyClass.<construct>(int, string) -> void>
 ```
 
 Constructors that call `super(...)` emit `INVOKE_SPECIAL` targeting the parent's constructor as the first
-statement in the constructor body.
+statement in the constructor body. Likewise, a constructor that delegates with `this(...)` (see
+[specs.md § Constructor chaining](specs.md#constructor-chaining-this)) emits `INVOKE_SPECIAL` targeting the
+sibling constructor of the **same** class as its first instruction sequence (`LOAD_0` for the receiver, the
+arguments, then `INVOKE_SPECIAL <MyClass.<construct>(…)>`). The compiler guarantees delegation chains are acyclic
+(E046); the VM does not re-check at runtime.
 
 ### Super calls
 
@@ -628,15 +695,22 @@ the finally code at every exit point of the try block (normal completion, explic
 
 ### Stack trace construction
 
-When an exception is created (via `NEW` + `INVOKE_SPECIAL` on an `Exception` subclass), the VM captures the
-current call stack and stores it in the exception's `stackTrace` field as an array of `ExecutionPoint` objects.
+The stack trace is captured **during the execution of the base `Exception` constructor**: when
+`Exception.<construct>(string)` runs (invoked directly or through the `super(...)` chain of a subclass
+constructor), the VM natively walks the current call stack and assigns the resulting `ExecutionPoint[]` to the
+`stackTrace` field **before the constructor returns**. Frames belonging to the exception hierarchy's own
+constructor chain are excluded, so the trace starts at the `new` site.
+
+Because the assignment happens inside `construct`, it follows the ordinary `readonly` rule for the
+`class readonly Exception` (see [specs.md § Exception class hierarchy](specs.md#exception-class-hierarchy)) —
+the VM needs **no mechanism to bypass readonly enforcement**.
+
 Each `ExecutionPoint` contains:
 
-- `line`: the source line number (derived from a line-number table embedded in the method's debug info, if
-  present).
+- `line`: the source line number, derived from the [line-number table](#method-descriptor) of the method
+  (`line_table`), by selecting the entry covering the frame's current `pc`. If the table is absent
+  (`line_table_count = 0`), `line` is `0`.
 - `file`: the source file path (derived from the module's class name and namespace).
-
-The line-number table is optional debug information. If absent, `line` is `0`.
 
 ---
 
@@ -945,6 +1019,10 @@ POP
 INVOKE_STATIC <Config.getDefaultValue() -> string>
 END:
 ```
+
+The compiler guarantees exhaustiveness at compile time (see [compiler.md § Match exhaustiveness](compiler.md#match-exhaustiveness)):
+either a `default` arm exists, or the arms cover the whole value domain (enum cases, `bool`). The generated code
+therefore always reaches exactly one arm — no runtime "unmatched value" path is emitted.
 
 ---
 

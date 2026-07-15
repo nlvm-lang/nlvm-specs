@@ -11,7 +11,7 @@ This document describes the recommended phases for building a complete NL toolch
 | # | Milestone | Deliverable | Key references |
 |---|-----------|-------------|----------------|
 | 1 | [Lexer & Parser](#milestone-1--lexer--parser) | AST for all NL syntax | specs.md |
-| 2 | [Semantic analysis](#milestone-2--semantic-analysis) | Error diagnostics (44 error codes, 1 warning) | compiler.md, specs.md |
+| 2 | [Semantic analysis](#milestone-2--semantic-analysis) | Error diagnostics (49 error codes, 1 warning) | compiler.md, specs.md |
 | 3 | [Bytecode emission](#milestone-3--bytecode-emission) | Valid `.nlm` modules | vm.md §§ Module format, Compilation strategies; compiler.md § [Compiler invocation (nlc)](compiler.md#compiler-invocation-nlc) |
 | 4 | [VM core](#milestone-4--vm-core) | Execute primitive programs | vm.md §§ Architecture, Value representation, Instruction set, Program startup, [VM invocation (nlvm)](vm.md#vm-invocation-nlvm) |
 | 5 | [Objects, arrays & dispatch](#milestone-5--objects-arrays--dispatch) | OOP programs run | vm.md §§ Object model, Method dispatch |
@@ -62,14 +62,16 @@ Implement all compile-time checks defined in compiler.md. This milestone require
 - **Name resolution:** resolve namespace-qualified names, imports, class references, field/method lookups, and `super`/`this`/`Self`/`type` keywords.
 - **Type system:** primitives, arrays, union types (`T|null`), `auto` deduction, `typedef` aliases, class/interface subtyping, template instantiation (monomorphization).
 - **Definite assignment analysis** — [compiler.md § Definite assignment](compiler.md#definite-assignment-analysis): E001, E002.
-- **Null safety** — [compiler.md § Null safety](compiler.md#null-safety): E003, E004.
+- **Null safety** — [compiler.md § Null safety](compiler.md#null-safety): E003, E004; type narrowing (smart casts) — [compiler.md § Type narrowing](compiler.md#type-narrowing-smart-casts).
 - **Type checking** — [compiler.md § Type checking](compiler.md#type-checking): `auto` (E005), templates (E006, E037), casts (E007), string concatenation (E008), operator compatibility (E009).
 - **Immutability enforcement** — [compiler.md § Immutability](compiler.md#immutability-enforcement): `const` methods (E010, E011), `const` parameters and locals (E012), for-each in const context (E039), interface const implementation (E044), `readonly` (E013, E014).
-- **Exception checking** — [compiler.md § Exception checking](compiler.md#exception-checking): checked propagation (E015), inheritance rules (E016, E017).
+- **Exception checking** — [compiler.md § Exception checking](compiler.md#exception-checking): checked propagation (E015), inheritance rules (E016, E017), unreachable catch clauses (E048).
+- **Match exhaustiveness** — [compiler.md § Match exhaustiveness](compiler.md#match-exhaustiveness): E047.
+- **Constructor delegation** — [compiler.md § Constructor delegation](compiler.md#constructor-delegation): delegation-first rule (E045), cycle detection (E046).
 - **Visibility enforcement** — [compiler.md § Visibility](compiler.md#visibility-enforcement): E018, E019.
 - **Parameter validation** — [compiler.md § Parameter validation](compiler.md#parameter-validation): `ref` rules (E020–E022), named/optional rules (E023–E026).
 - **Entry point validation** — [compiler.md § Entry point](compiler.md#entry-point-validation): E027–E029.
-- **Inheritance modifiers** — [compiler.md § Inheritance modifiers](compiler.md#inheritance-modifiers-abstract-final): abstract (E032–E034), final (E035, E036).
+- **Inheritance modifiers** — [compiler.md § Inheritance modifiers](compiler.md#inheritance-modifiers-abstract-final): abstract (E032–E034), final (E035, E036), conflicting modifiers (E049).
 - **Reserved keywords** — [compiler.md § Reserved keywords](compiler.md#reserved-keywords): E030.
 - **Default values and arrays** — [compiler.md § Default values](compiler.md#default-values): E031, E038.
 - **Static context** — [compiler.md § Static context restrictions](compiler.md#static-context-restrictions): E040.
@@ -104,7 +106,8 @@ Generate the binary module format defined in vm.md from the validated AST.
   - `++`/`--` strategies — [vm.md § Increment and decrement operators](vm.md#increment-and-decrement-operators).
   - `??` and `?:` — [vm.md § Nullish coalescing and elvis operators](vm.md#nullish-coalescing-and-elvis-operators).
   - `switch`/`match` — [vm.md § Switch statements](vm.md#switch-statements), [§ Match expressions](vm.md#match-expressions).
-- **Method descriptors:** `max_locals`, `max_stack` computation, exception table generation.
+- **Method descriptors:** `max_locals`, `max_stack` computation, exception table generation, line-number table (debug info) — [vm.md § Method descriptor](vm.md#method-descriptor).
+- **Module integrity:** SHA-256 trailer emission — [vm.md § Module integrity](vm.md#module-integrity).
 
 ### Testable at this stage
 
@@ -216,7 +219,7 @@ Implement native bindings for all `system.*` classes.
 - **Date/Time:** `system.time.DateTime`, `system.time.TimeZone` — [stdlib.md § system.time](stdlib.md#systemtimedatetime).
 - **Process:** `system.ps.Process` — [stdlib.md § system.ps](stdlib.md#systemps).
 - **Text:** `system.text.Regex`, `system.text.Encoding` — [stdlib.md § system.text](stdlib.md#systemtextregex).
-- **Other:** `system.Random`, `system.Uuid`, `system.Env` — [stdlib.md § system.Random](stdlib.md#systemrandom), [§ system.Uuid](stdlib.md#systemuuid), [§ system.Env](stdlib.md#systemenv).
+- **Other:** `system.Random`, `system.SecureRandom`, `system.Uuid`, `system.Env` — [stdlib.md § system.Random](stdlib.md#systemrandom), [§ system.SecureRandom](stdlib.md#systemsecurerandom), [§ system.Uuid](stdlib.md#systemuuid), [§ system.Env](stdlib.md#systemenv).
 - **Garbage collection** — [vm.md § Garbage collection contract](vm.md#garbage-collection-contract): destructor calls, reachability.
 
 ### Testable at this stage
@@ -238,7 +241,7 @@ Build the test runner that executes the YAML test suite, and validate the full t
 - **Compile-only tests** (`compile_only: true`): compile and verify success, no execution.
 - **Module-structure assertions:** parse the compiled module and verify `expected_class`, `expected_methods`, `expected_fields`, `expected_constant_pool_contains`.
 - **Test discovery:** scan `tests/` directory, run all `*.yaml` files, report pass/fail summary.
-- **Error tests (extension):** tests that verify the compiler correctly rejects invalid programs with specific error codes (E001–E044, W001). Requires extending the test format or adding a convention (e.g. `expected_error: "E003"` header key).
+- **Error tests (extension):** tests that verify the compiler correctly rejects invalid programs with specific error codes (E001–E049, W001). Requires extending the test format or adding a convention (e.g. `expected_error: "E003"` header key).
 
 ### Testable at this stage
 

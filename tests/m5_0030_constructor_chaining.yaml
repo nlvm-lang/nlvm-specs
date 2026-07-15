@@ -1,0 +1,40 @@
+---
+title: "Constructor chaining — this(...) delegates to another constructor of the same class"
+file_separator: "#NLFILE"
+expected_exit_code: 0
+expected_stdout: "Doe John 0|Smith Jane 30"
+---
+
+#NLFILE test/chaining/Contact.nl
+namespace test.chaining;
+class Contact {
+	public string lastName;
+	public string firstName;
+	public int age;
+
+	public construct(string lastName, string firstName, int age) {
+		this.lastName = lastName;
+		this.firstName = firstName;
+		this.age = age;
+	}
+
+	public construct(string lastName, string firstName) {
+		this(lastName, firstName, 0);
+	}
+
+	public string display() const {
+		return this.lastName + " " + this.firstName + " " + this.age;
+	}
+}
+
+#NLFILE test/chaining/Main.nl
+namespace test.chaining;
+use test.chaining.Contact;
+class Main {
+	public static int main(string[] args) {
+		auto a = new Contact("Doe", "John");
+		auto b = new Contact("Smith", "Jane", 30);
+		system.Out.print(a.display() + "|" + b.display());
+		return 0;
+	}
+}

@@ -1,0 +1,26 @@
+---
+title: "system.Int.tryParse / system.Float.tryParse — null on invalid input, value otherwise"
+file_separator: "#NLFILE"
+expected_exit_code: 0
+expected_stdout: "42 null 3.14 null"
+---
+
+#NLFILE test/tryparse/Main.nl
+namespace test.tryparse;
+class Main {
+	public static int main(string[] args) {
+		int|null a = system.Int.tryParse("42");
+		int|null b = system.Int.tryParse("abc");
+		float|null c = system.Float.tryParse("3.14");
+		float|null d = system.Float.tryParse("x.y");
+
+		system.Out.print(a != null ? system.Int.toString(a) : "null");
+		system.Out.print(" ");
+		system.Out.print(b != null ? system.Int.toString(b) : "null");
+		system.Out.print(" ");
+		system.Out.print(c != null ? system.Float.toString(c) : "null");
+		system.Out.print(" ");
+		system.Out.print(d != null ? system.Float.toString(d) : "null");
+		return 0;
+	}
+}
