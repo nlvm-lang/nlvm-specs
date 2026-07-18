@@ -22,7 +22,7 @@ use test.instanceof.Dog;
 class Main {
 	public static int main(string[] args) {
 		Dog dog = new Dog();
-		Animal animal = dog;
+		Animal|null animal = dog;
 		system.Out.print((dog instanceof Dog) ? "true" : "false");
 		system.Out.print(" ");
 		system.Out.print((animal instanceof Dog) ? "true" : "false");

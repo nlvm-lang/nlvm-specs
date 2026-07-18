@@ -124,12 +124,17 @@ string|null name = null;      // OK
 ### Union type compatibility
 
 When assigning a value to a union type, the compiler verifies that the value's static type is one of the union's
-constituent types (or a subclass thereof). Conversely, using a union-typed value in a context that expects a specific
-type requires narrowing (e.g. via an `if` check, `match`, or null comparison).
+constituent types, or a subtype thereof per the [implicit conversions](specs.md#type-conversions-and-casting) rules
+(a subclass, or a class implementing an interface constituent). Conversely, using a union-typed value in a context
+that expects a specific type requires narrowing (e.g. via an `if` check, `match`, or null comparison).
 
 ```
 string|int value = 42;       // OK — int is in the union
 string|int value = true;     // E004 — bool is not in the union
+
+interface Animal {}
+class Dog implements Animal {}
+Animal|null pet = new Dog(); // OK — Dog implements Animal, a union constituent
 ```
 
 **Error:** `E004 — Type '%s' is not assignable to '%s'`

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.44 — 2026-07-18
+
+### Changed
+
+- **docs/compiler.md** — § Union type compatibility: clarified that a value is assignable to a union constituent
+  "or a subtype thereof" per the [implicit conversions](docs/specs.md#type-conversions-and-casting) table —
+  explicitly includes classes implementing an interface constituent (previously worded as "subclass thereof",
+  ambiguous as to whether interface implementation counted). Added an `Animal|null pet = new Dog()` example.
+- **tests/m5_0020_instanceof.yaml** — `Animal animal = dog;` changed to `Animal|null animal = dog;`; the original
+  non-nullable declaration made the later `animal = null;` a legitimate E003 violation, contradicting the test's
+  `expected_exit_code: 0`.
+
 ## 0.8.43 — 2026-07-14
 
 Security hardening pass — resolves coherence VIII-2, VIII-3, VIII-4, VIII-5, VIII-6, VIII-7, VIII-9, VIII-10
