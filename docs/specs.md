@@ -2476,6 +2476,9 @@ class readonly FileNotFoundException extends IOException {
 class readonly FormatException extends Exception {
     // Invalid string format (e.g. DateTime.parse, base64Decode)
 }
+class readonly JsonFormatException extends FormatException {
+    // Invalid JSON text (system.text.json.Json.parse); carries line, column, expectedToken, foundToken
+}
 class readonly InterruptedException extends Exception {
     // Thread interrupted while blocked (e.g. join, sleep)
 }

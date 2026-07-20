@@ -1,6 +1,6 @@
 # NL Standard Library (System API)
 
-This document describes the virtual standard library provided by the NL runtime for system interaction: standard streams (out, err, in), parsing, file system access (including glob, directories, paths), network sockets (TCP, UDP) and HTTP, threads and synchronization (Mutex, Semaphore), date/time with timezone, grep-style text search, environment variables, process listing and subprocess execution, string and regex utilities, random and UUID, encoding and base64. All types live in the **`system`**, **`system.io`**, **`system.net`**, **`system.thread`**, **`system.time`**, **`system.ps`**, and **`system.text`** namespaces and are available without explicit import in user code (built-in bindings). Return types written as **`T|null`** (or other union types like **`Type1|Type2|null`**) denote nullable or union types as defined in the language specification (see [specs.md](specs.md)#union-types-and-explicit-nullable).
+This document describes the virtual standard library provided by the NL runtime for system interaction: standard streams (out, err, in), parsing, file system access (including glob, directories, paths), network sockets (TCP, UDP) and HTTP, threads and synchronization (Mutex, Semaphore), date/time with timezone, grep-style text search, environment variables, process listing and subprocess execution, string and regex utilities, random and UUID, encoding and base64, JSON parsing and serialization. All types live in the **`system`**, **`system.io`**, **`system.net`**, **`system.thread`**, **`system.time`**, **`system.ps`**, **`system.text`**, and **`system.text.json`** namespaces and are available without explicit import in user code (built-in bindings). Return types written as **`T|null`** (or other union types like **`Type1|Type2|null`**) denote nullable or union types as defined in the language specification (see [specs.md](specs.md)#union-types-and-explicit-nullable).
 
 ---
 
@@ -42,6 +42,7 @@ This document describes the virtual standard library provided by the NL runtime 
 * [system.ps](#systemps)
 * [system.text.Regex](#systemtextregex)
 * [system.text.Encoding](#systemtextencoding)
+* [system.text.json](#systemtextjson)
 * [Exceptions](#exceptions)
 
 ---
@@ -57,6 +58,7 @@ This document describes the virtual standard library provided by the NL runtime 
 | `system.time`| Date, time, timezone (DateTime, TimeZone) |
 | `system.ps`| Process listing (Process.list, ProcessInfo), subprocess execution and current process (Process.run, Process.pid, Process.getCwd, Process.setCwd, Process.exit) |
 | `system.text`| Regex, Encoding (UTF-8, base64) |
+| `system.text.json`| JSON parsing and serialization (JsonValue and subclasses, Json) |
 
 Classes in these namespaces are part of the language/runtime contract. User code may reference them by fully qualified name (e.g. `system.Out.print`) or after importing with `use system.Out;` (then `Out.print`).
 
@@ -1024,6 +1026,125 @@ byte[] decoded = system.text.Encoding.base64Decode(b64);
 
 ---
 
+## system.text.json
+
+JSON ([RFC 8259](https://www.rfc-editor.org/rfc/rfc8259)) parsing and serialization. A JSON document is represented as a **`JsonValue`** tree; **`system.text.json.Json`** provides the static `parse`/`tryParse`/`stringify` entry points. All types live in the `system.text.json` namespace.
+
+### system.text.json.JsonValue
+
+Abstract base class for the six JSON value kinds. Implements [Stringable](specs.md#stringable-interface): `toString()` returns the compact JSON serialization of the value (and its descendants).
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `toString` | `string toString() const` | Compact JSON serialization of this value. |
+| `isNull` | `bool isNull() const` | `true` if this is `JsonNull`. |
+| `isBool` | `bool isBool() const` | `true` if this is `JsonBool`. |
+| `isNumber` | `bool isNumber() const` | `true` if this is `JsonNumber`. |
+| `isString` | `bool isString() const` | `true` if this is `JsonString`. |
+| `isArray` | `bool isArray() const` | `true` if this is `JsonArray`. |
+| `isObject` | `bool isObject() const` | `true` if this is `JsonObject`. |
+| `asBool` | `bool asBool() const` | Returns the boolean value. Throws `InvalidCastException` if this is not `JsonBool`. |
+| `asNumber` | `float asNumber() const` | Returns the numeric value. Throws `InvalidCastException` if this is not `JsonNumber`. |
+| `asString` | `string asString() const` | Returns the string value. Throws `InvalidCastException` if this is not `JsonString`. |
+| `asArray` | `JsonArray asArray() const` | Returns this value as `JsonArray`. Throws `InvalidCastException` if this is not `JsonArray`. |
+| `asObject` | `JsonObject asObject() const` | Returns this value as `JsonObject`. Throws `InvalidCastException` if this is not `JsonObject`. |
+
+**Concrete subclasses:**
+
+| Class | Fields / constructor | Description |
+|-------|------------------------|-------------|
+| `JsonNull` | `construct()` | Represents JSON `null`. No fields. |
+| `JsonBool` | `construct(bool value)`, `public bool value` | Wraps a boolean. |
+| `JsonNumber` | `construct(float value)`, `public float value` | Wraps a JSON number. JSON has a single numeric type; NL represents it as `float` — integers beyond 2⁵³ lose precision (same trade-off as JavaScript's `JSON.parse`). |
+| `JsonString` | `construct(string value)`, `public string value` | Wraps a string. |
+| `JsonArray` | see below | Ordered list of `JsonValue`. |
+| `JsonObject` | see below | Ordered key-value map of `string` to `JsonValue`. |
+
+All six are `final class readonly`: immutable after construction (a `JsonArray`/`JsonObject` cannot be reassigned to a different underlying list/map, but its contents can still be mutated through `add`/`set`/`remove`, like any `readonly` property holding a mutable object).
+
+### system.text.json.JsonArray
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `construct` | `construct()` | Creates an empty array. |
+| `length` | `int length() const` | Returns the number of elements. |
+| `get` | `JsonValue get(int index) const` | Returns the element at `index`. Throws `IndexOutOfBoundsException` if out of range. |
+| `set` | `void set(int index, JsonValue value)` | Replaces the element at `index`. Throws `IndexOutOfBoundsException` if out of range. |
+| `add` | `void add(JsonValue value)` | Appends `value` to the end. |
+| `values` | `JsonValue[] values() const` | Returns a snapshot array of all elements, in order. |
+
+### system.text.json.JsonObject
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `construct` | `construct()` | Creates an empty object. |
+| `size` | `int size() const` | Returns the number of key-value pairs. |
+| `get` | `JsonValue\|null get(string key) const` | Returns the value for `key`, or `null` if the key is **absent**. |
+| `set` | `void set(string key, JsonValue value)` | Associates `key` with `value` (insert or update). |
+| `has` | `bool has(string key) const` | Returns `true` if `key` is present. |
+| `remove` | `bool remove(string key)` | Removes the entry for `key`. Returns `true` if it was present. |
+| `keys` | `string[] keys() const` | Returns all keys, in the same order as `entries()`. |
+| `entries` | `system.MapEntry<string, JsonValue>[] entries() const` | Returns all key-value pairs as [MapEntry](#result-types) objects. |
+
+**Absent key vs. JSON `null`:** `get(key)` returns NL `null` only when `key` is not in the object. A key present with the JSON value `null` returns a `JsonNull` instance (for which `isNull()` is `true`), not NL `null`. This mirrors the same distinction `system.Map.get` makes between "key absent" and "value is null" for reference-typed maps.
+
+Key order follows insertion order (same iteration-order guarantee as [system.Map](#systemmap)).
+
+### system.text.json.Json
+
+Parsing and serialization entry points. All methods are **static**.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `parse` | `static JsonValue parse(string text) throws JsonFormatException` | Parses `text` as JSON and returns the resulting value tree. Throws `JsonFormatException` on malformed input. |
+| `tryParse` | `static JsonValue\|null tryParse(string text)` | Same parsing; returns `null` instead of throwing when `text` is not valid JSON. Safe-by-default alternative to `parse` for untrusted input. |
+| `stringify` | `static string stringify(JsonValue value)` | Serializes `value` to a compact JSON string (no extra whitespace). |
+| `stringify` | `static string stringify(JsonValue value, int indent)` | Serializes `value` to a pretty-printed JSON string, indenting nested levels by `indent` spaces. |
+
+**Example**
+
+```nl
+// Parsing
+system.text.json.JsonValue root = system.text.json.Json.parse(
+    "{\"name\": \"Ada\", \"tags\": [\"eng\", \"math\"], \"active\": true}"
+);
+
+system.text.json.JsonValue|null nameValue = root.asObject().get("name");
+string name = nameValue != null ? nameValue.asString() : "unknown"; // "Ada"
+
+system.text.json.JsonValue|null tagsValue = root.asObject().get("tags");
+if (tagsValue != null) {
+    system.text.json.JsonArray tags = tagsValue.asArray();
+    for (const auto tag : tags.values()) {
+        system.Out.println(tag.asString()); // "eng", then "math"
+    }
+}
+
+// Safe parsing of untrusted input
+system.text.json.JsonValue|null parsed = system.text.json.Json.tryParse(userInput);
+if (parsed == null) {
+    system.Out.println("invalid JSON");
+}
+
+// Building and serializing
+auto obj = new system.text.json.JsonObject();
+obj.set("name", new system.text.json.JsonString("Ada"));
+obj.set("active", new system.text.json.JsonBool(true));
+string compact = system.text.json.Json.stringify(obj);     // {"name":"Ada","active":true}
+string pretty = system.text.json.Json.stringify(obj, 2);   // indented, 2 spaces per level
+
+// Precise error reporting
+try {
+    system.text.json.Json.parse("{ \"a\": }");
+}
+catch (system.text.json.JsonFormatException ex) {
+    system.Out.println("JSON error at line " + ex.line + ", column " + ex.column +
+        ": expected " + ex.expectedToken + " but found " + ex.foundToken);
+}
+```
+
+---
+
 ## Exceptions
 
 Standard exceptions used by the system API. The hierarchy (Runtime vs Checked) is defined in the language specification (see [specs.md](specs.md)#exception-class-hierarchy). **Runtime** exceptions do not require a `throws` declaration; **Checked** exceptions must be declared or handled.
@@ -1041,6 +1162,7 @@ Standard exceptions used by the system API. The hierarchy (Runtime vs Checked) i
 | `InterruptedException` | Checked | `system.thread` | Thrown when a thread is interrupted while blocked in `join()` or `sleep()`. |
 | `FormatException` | Checked | `system.time` | `system.time.DateTime.parse()` when the string format is invalid. |
 | `FormatException` | Checked | `system.text` | `system.text.Encoding.base64Decode()` when the string is not valid base64. |
+| `JsonFormatException` | Checked | `system.text.json` | `system.text.json.Json.parse()` when `text` is not valid JSON. Extends `system.text.FormatException`; carries `line`, `column`, `expectedToken`, `foundToken`. |
 
 ---
 

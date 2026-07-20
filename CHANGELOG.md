@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.45 — 2026-07-20
+
+### Added
+
+- **docs/stdlib.md** — § system.text.json (new): JSON (RFC 8259) parsing and serialization. `JsonValue` abstract base with `JsonNull`, `JsonBool`, `JsonNumber`, `JsonString`, `JsonArray`, `JsonObject` subclasses (type predicates `isX()`, typed accessors `asX()` throwing `InvalidCastException` on mismatch); `Json.parse`/`tryParse`/`stringify` static entry points. `JsonObject.get` distinguishes an absent key (`null`) from a present key with JSON `null` value (`JsonNull`).
+- **docs/stdlib.md** — § Exceptions: `JsonFormatException` (checked, `system.text.json`) — thrown by `Json.parse` on malformed input; carries `line`, `column`, `expectedToken`, `foundToken` for precise error reporting.
+
+### Changed
+
+- **docs/specs.md** — § Exception class hierarchy: added `JsonFormatException extends FormatException`.
+
 ## 0.8.44 — 2026-07-18
 
 ### Changed
