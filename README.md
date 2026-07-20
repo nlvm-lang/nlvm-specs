@@ -2,8 +2,8 @@
 
 ---
 
-- **Docs :** [tivins.github.io/nlvm-specs](https://tivins.github.io/nlvm-specs/)
-- **Source :** [github.com/tivins/nlvm-specs](https://github.com/tivins/nlvm-specs)
+- **Docs :** [nlvm-lang.github.io/nlvm-specs](https://nlvm-lang.github.io/nlvm-specs)
+- **Source :** [github.com/nlvm-lang/nlvm-specs](https://github.com/nlvm-lang/nlvm-specs)
 
 ---
 
@@ -82,7 +82,7 @@ For the broader **language evolution** history (vvm repository, Nov–Dec 2025),
 
 ## Docsify site
 
-[https://tivins.github.io/nlvm-specs/](https://tivins.github.io/nlvm-specs/)
+[https://nlvm-lang.github.io/nlvm-specs/](https://nlvm-lang.github.io/nlvm-specs)
 
 A browsable docs front is provided via [Docsify](https://docsify.js.org/). Files: `index.html`, `_sidebar.md`, `.nojekyll`.
 
