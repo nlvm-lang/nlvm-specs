@@ -2,7 +2,7 @@
 
 ---
 
-- **Docs :** [nlvm-lang.github.io/nlvm-specs](https://nlvm-lang.github.io/nlvm-specs)
+- **Docs :** https://specs.nlvm.dev [nlvm-lang.github.io/nlvm-specs](https://nlvm-lang.github.io/nlvm-specs)
 - **Source :** [github.com/nlvm-lang/nlvm-specs](https://github.com/nlvm-lang/nlvm-specs)
 
 ---
