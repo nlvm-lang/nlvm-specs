@@ -2,7 +2,7 @@
 
 ---
 
-- **Docs :** https://specs.nlvm.dev [nlvm-lang.github.io/nlvm-specs](https://nlvm-lang.github.io/nlvm-specs)
+- **Docs :** [specs.nlvm.dev](https://specs.nlvm.dev)
 - **Source :** [github.com/nlvm-lang/nlvm-specs](https://github.com/nlvm-lang/nlvm-specs)
 
 ---
@@ -82,7 +82,7 @@ For the broader **language evolution** history (vvm repository, Nov–Dec 2025),
 
 ## Docsify site
 
-[https://nlvm-lang.github.io/nlvm-specs/](https://nlvm-lang.github.io/nlvm-specs)
+[https://specs.nlvm.dev/](https://specs.nlvm.dev)
 
 A browsable docs front is provided via [Docsify](https://docsify.js.org/). Files: `index.html`, `_sidebar.md`, `.nojekyll`.
 
