@@ -1,3 +1,11 @@
+/* Brand logo next to the site name in the sidebar */
+.app-name-link .nl-logo {
+  height: 22px;
+  width: 22px;
+  vertical-align: -5px;
+  margin-right: 8px;
+}
+
 /* Override headings and borders in dark mode — less bright */
 html.docsify-dark .markdown-section h1,
 html.docsify-dark .markdown-section h2,

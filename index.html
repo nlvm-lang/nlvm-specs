@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NLVM Specs — Language Specification</title>
+  <title>The NL programming language specification</title>
+  <link rel="icon" type="image/svg+xml" href="assets/brand/logo.svg">
+  <link rel="alternate icon" href="assets/brand/logo-32.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-darklight-theme@latest/dist/style.min.css" title="docsify-darklight-theme" type="text/css">
   <link rel="stylesheet" href="docsify-custom.css">
 </head>
@@ -11,7 +13,7 @@
   <div id="app"></div>
   <script>
     window.$docsify = {
-      name: 'NL Specs',
+      name: '<img src="assets/brand/logo.svg" alt="" class="nl-logo">NL Specs',
       repo: 'https://github.com/nlvm-lang/nlvm-specs',
       loadSidebar: true,
       loadNavbar: false,
@@ -21,6 +23,32 @@
       basePath: /github\.io/.test(location.hostname)
         ? '/' + location.pathname.split('/')[1] + '/'
         : '/',
+      darklightTheme: {
+        dark: {
+          accent: '#3ecfae',
+          background: '#0f1413',
+          textColor: '#dbe4e0',
+          codeTextColor: '#dbe4e0',
+          codeBackgroundColor: '#0e1514',
+          borderColor: '#21302b',
+          blockQuoteColor: '#90a49d',
+          highlightColor: '#5fe3c4',
+          sidebarSublink: '#90a49d',
+          codeTypeColor: '#82b8dd'
+        },
+        light: {
+          accent: '#1f9d82',
+          background: '#ffffff',
+          textColor: '#1a2422',
+          codeTextColor: '#1f2d29',
+          codeBackgroundColor: '#f0f4f2',
+          borderColor: '#d7e2de',
+          blockQuoteColor: '#5f7370',
+          highlightColor: '#1f9d82',
+          sidebarSublink: '#4b5e59',
+          codeTypeColor: '#2f6690'
+        }
+      },
       plugins: [
         function (hook, vm) {
           var updateDarkClass = function () {

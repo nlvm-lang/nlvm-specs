@@ -1,9 +1,7 @@
-# NLVM — Language Specification
+# The NL Programming Language Specification
 
----
+[nlvm.dev](https://nlvm.dev) &middot; [specs.nlvm.dev](https://specs.nlvm.dev) &middot; [GitHub](https://github.com/nlvm-lang/nlvm-specs)
 
-- **Docs :** [specs.nlvm.dev](https://specs.nlvm.dev)
-- **Source :** [github.com/nlvm-lang/nlvm-specs](https://github.com/nlvm-lang/nlvm-specs)
 
 ---
 
