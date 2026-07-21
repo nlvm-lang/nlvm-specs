@@ -2479,6 +2479,11 @@ class readonly FormatException extends Exception {
 class readonly JsonFormatException extends FormatException {
     // Invalid JSON text (system.text.json.Json.parse); carries line, column, expectedToken, foundToken
 }
+class readonly SqlException extends Exception {
+    // Database failure (system.db.*); carries sqlState (SQLSTATE code) and errorCode (driver-specific)
+    public string sqlState;
+    public int errorCode;
+}
 class readonly InterruptedException extends Exception {
     // Thread interrupted while blocked (e.g. join, sleep)
 }

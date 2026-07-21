@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.46 — 2026-07-21
+
+### Added
+
+- **docs/stdlib.md** — § system.db (new): SQL database connectivity. Driver-agnostic base types `Connection` (opaque, returned by driver factories), `PreparedStatement` (0-based `?` placeholder binding via `bindInt`/`bindFloat`/`bindBool`/`bindString`/`bindBytes`/`bindNull`), `ResultSet` (cursor with `Row|null next()`, for-each iterable), `Row` (typed accessors `getInt`/`getFloat`/`getBool`/`getString`/`getBytes` returning `T|null` for SQL NULL, by 0-based index or column name), and enum `ColumnType` (`Integer`, `Float`, `Text`, `Blob`, `Bool`, `Null`). Transaction API on `Connection`: `beginTransaction`/`commit`/`rollback`. `Connection.lastInsertId` for auto-increment retrieval. Convenience `query(string)` / `execute(string)` for constant SQL (no user input). Resource semantics parallel to `FileHandle`/`TcpStream` (idempotent `close()`, use-after-close throws `SqlException`).
+- **docs/stdlib.md** — § system.db.sqlite (new): SQLite driver. `Sqlite.open(path)` / `Sqlite.open(path, SqliteOpenMode)` / `Sqlite.openMemory()`; enum `SqliteOpenMode` (`ReadOnly`, `ReadWrite`, `ReadWriteCreate`). Path-traversal security note aligned with `system.io.File`.
+- **docs/stdlib.md** — § system.db.mysql (new): MySQL / MariaDB driver. `Mysql.connect(MysqlConfig)`; `MysqlConfig` fields `host`, `port` (default 3306), `user`, `password`, `database` (default `""`), `useTls` (default `true`). Mandatory TLS certificate validation when `useTls = true` (parallel to `system.net.Http` for `https://`); credentials-handling security note.
+- **docs/stdlib.md** — § Exceptions: `SqlException` (checked, `system.db`) — thrown by all `system.db.*` operations on connection error, TLS validation failure, SQL error, constraint violation, bind/column resolution failure, or use of a closed/stale handle; carries `sqlState` (SQLSTATE, empty when unavailable) and `errorCode` (driver-specific, `0` when unavailable).
+
+### Changed
+
+- **docs/specs.md** — § Exception class hierarchy: added `SqlException extends Exception` with public `sqlState: string` and `errorCode: int`.
+
+### Updated references
+
+- **docs/milestones.md** — M7 scope: added Database bullet (drivers, opaque `Connection`, `?` placeholders, 0-based binding).
+
 ## 0.8.45 — 2026-07-20
 
 ### Added

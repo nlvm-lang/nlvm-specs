@@ -219,6 +219,7 @@ Implement native bindings for all `system.*` classes.
 - **Date/Time:** `system.time.DateTime`, `system.time.TimeZone` — [stdlib.md § system.time](stdlib.md#systemtimedatetime).
 - **Process:** `system.ps.Process` — [stdlib.md § system.ps](stdlib.md#systemps).
 - **Text:** `system.text.Regex`, `system.text.Encoding` — [stdlib.md § system.text](stdlib.md#systemtextregex).
+- **Database:** `system.db.Connection`, `system.db.PreparedStatement`, `system.db.ResultSet`, `system.db.Row`, `system.db.ColumnType`, drivers `system.db.sqlite.Sqlite` and `system.db.mysql.Mysql` — [stdlib.md § system.db](stdlib.md#systemdb). Driver factories return an opaque `Connection`; user code stays driver-agnostic. Parameterized queries via `?` placeholders (0-based binding).
 - **Other:** `system.Random`, `system.SecureRandom`, `system.Uuid`, `system.Env` — [stdlib.md § system.Random](stdlib.md#systemrandom), [§ system.SecureRandom](stdlib.md#systemsecurerandom), [§ system.Uuid](stdlib.md#systemuuid), [§ system.Env](stdlib.md#systemenv).
 - **Garbage collection** — [vm.md § Garbage collection contract](vm.md#garbage-collection-contract): destructor calls, reachability.
 

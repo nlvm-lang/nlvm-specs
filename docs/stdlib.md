@@ -1,6 +1,6 @@
 # NL Standard Library (System API)
 
-This document describes the virtual standard library provided by the NL runtime for system interaction: standard streams (out, err, in), parsing, file system access (including glob, directories, paths), network sockets (TCP, UDP) and HTTP, threads and synchronization (Mutex, Semaphore), date/time with timezone, grep-style text search, environment variables, process listing and subprocess execution, string and regex utilities, random and UUID, encoding and base64, JSON parsing and serialization. All types live in the **`system`**, **`system.io`**, **`system.net`**, **`system.thread`**, **`system.time`**, **`system.ps`**, **`system.text`**, and **`system.text.json`** namespaces and are available without explicit import in user code (built-in bindings). Return types written as **`T|null`** (or other union types like **`Type1|Type2|null`**) denote nullable or union types as defined in the language specification (see [specs.md](specs.md)#union-types-and-explicit-nullable).
+This document describes the virtual standard library provided by the NL runtime for system interaction: standard streams (out, err, in), parsing, file system access (including glob, directories, paths), network sockets (TCP, UDP) and HTTP, threads and synchronization (Mutex, Semaphore), date/time with timezone, grep-style text search, environment variables, process listing and subprocess execution, string and regex utilities, random and UUID, encoding and base64, JSON parsing and serialization, SQL database connectivity (SQLite, MySQL). All types live in the **`system`**, **`system.io`**, **`system.net`**, **`system.thread`**, **`system.time`**, **`system.ps`**, **`system.text`**, **`system.text.json`**, **`system.db`**, **`system.db.sqlite`**, and **`system.db.mysql`** namespaces and are available without explicit import in user code (built-in bindings). Return types written as **`T|null`** (or other union types like **`Type1|Type2|null`**) denote nullable or union types as defined in the language specification (see [specs.md](specs.md)#union-types-and-explicit-nullable).
 
 ---
 
@@ -43,6 +43,9 @@ This document describes the virtual standard library provided by the NL runtime 
 * [system.text.Regex](#systemtextregex)
 * [system.text.Encoding](#systemtextencoding)
 * [system.text.json](#systemtextjson)
+* [system.db](#systemdb)
+* [system.db.sqlite](#systemdbsqlite)
+* [system.db.mysql](#systemdbmysql)
 * [Exceptions](#exceptions)
 
 ---
@@ -59,6 +62,9 @@ This document describes the virtual standard library provided by the NL runtime 
 | `system.ps`| Process listing (Process.list, ProcessInfo), subprocess execution and current process (Process.run, Process.pid, Process.getCwd, Process.setCwd, Process.exit) |
 | `system.text`| Regex, Encoding (UTF-8, base64) |
 | `system.text.json`| JSON parsing and serialization (JsonValue and subclasses, Json) |
+| `system.db`| SQL database connectivity — driver-agnostic types (Connection, PreparedStatement, ResultSet, Row, ColumnType) |
+| `system.db.sqlite`| SQLite driver (Sqlite factory) |
+| `system.db.mysql`| MySQL driver (Mysql factory) |
 
 Classes in these namespaces are part of the language/runtime contract. User code may reference them by fully qualified name (e.g. `system.Out.print`) or after importing with `use system.Out;` (then `Out.print`).
 
@@ -1145,6 +1151,267 @@ catch (system.text.json.JsonFormatException ex) {
 
 ---
 
+## system.db
+
+SQL database connectivity. The `system.db` namespace defines driver-agnostic types (`Connection`, `PreparedStatement`, `ResultSet`, `Row`, `ColumnType`) used by every driver; concrete drivers live in sub-namespaces (`system.db.sqlite`, `system.db.mysql`) and expose a static factory that returns a `Connection`. From the caller's point of view, code written against `Connection` is portable across drivers.
+
+**Placeholders.** All prepared statements use positional **`?`** placeholders (SQL92 style). Named placeholders (`:name`, `$1`) are not specified. Binding uses **0-based** indices to align with NL array and list conventions.
+
+**Security (SQL injection).** **Never** build SQL by concatenating user-controlled input (from `system.In.readLine()`, `args`, network data, HTTP bodies, JSON values, etc.) into the query text — any single quote, semicolon, or comment in the input can rewrite the statement (`"' OR 1=1 --"`). Always use `Connection.prepare(...)` and pass user data through `bindX(...)` — bound parameters are transmitted out-of-band and can never be interpreted as SQL. `Connection.query(string)` and `Connection.execute(string)` accept only the SQL text (no user data merged in) and are intended for constant, hard-coded statements (`"BEGIN"`, `"CREATE TABLE ..."`, admin scripts); passing an interpolated string to them is the same defect as `Process.run(string)` on user input (see [system.ps.Process](#systempsprocess)).
+
+**Thread safety.** `Connection`, `PreparedStatement`, and `ResultSet` are **not thread-safe** — a `Connection` may only be used from one thread at a time (including all statements and result sets derived from it). To share a database from multiple threads, either open one `Connection` per thread or serialize access with `system.thread.Mutex`. Heap objects are shared across threads (see [vm.md § Threading model](vm.md#threading-model)); driver internals rely on that guarantee but do not add locking.
+
+**Resource lifetime.** `Connection`, `PreparedStatement`, and `ResultSet` hold native handles and **must** be closed (explicit `close()` or destructor) — otherwise file descriptors, server-side cursors, and network connections leak. Closing a `Connection` also closes every `PreparedStatement` and `ResultSet` derived from it. `close()` is idempotent on all three types. **After a connection/statement/result set has been closed, any subsequent operation (other than `close()` itself) throws `SqlException`**, mirroring the closed-handle rule of [FileHandle](#systemiofilehandle) and [TcpStream](#systemnettcpstream).
+
+### system.db.ColumnType
+
+Enum describing the SQL type of a column value, as reported by `Row.columnType(int)`. All drivers map their native types to this small set.
+
+| Case | Description |
+|------|-------------|
+| `Integer` | Signed integer (mapped to NL `int`). |
+| `Float` | Floating-point number (mapped to NL `float`). |
+| `Text` | Text string (mapped to NL `string`, decoded as UTF-8). |
+| `Blob` | Binary data (mapped to NL `byte[]`). |
+| `Bool` | Boolean value (mapped to NL `bool`). Drivers without a native boolean type (e.g. SQLite) report boolean columns as `Integer` unless the schema declares them otherwise. |
+| `Null` | SQL `NULL`. |
+
+### system.db.Connection
+
+Represents an open database connection. Instances are obtained from a driver factory (`system.db.sqlite.Sqlite.open`, `system.db.mysql.Mysql.connect`) and are **opaque** to user code — the concrete subclass is an implementation detail of the driver. All methods are instance methods.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `prepare` | `PreparedStatement prepare(string sql) throws SqlException` | Compiles `sql` into a reusable prepared statement. The statement's placeholder count is derived from the `?` markers in `sql`. |
+| `query` | `ResultSet query(string sql) throws SqlException` | Executes a **constant** SQL query with no parameters and returns the result set. Convenience for hard-coded statements — do **not** pass user input; use `prepare(...)` + `bindX(...)` instead. |
+| `execute` | `int execute(string sql) throws SqlException` | Executes a **constant** SQL statement with no parameters (typically `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `BEGIN`, `COMMIT`, `ROLLBACK`). Returns the number of rows affected, or `0` for statements that do not affect rows. Same "no user input" caveat as `query(string)`. |
+| `beginTransaction` | `void beginTransaction() throws SqlException` | Starts a new transaction. Throws `SqlException` if a transaction is already active on this connection. |
+| `commit` | `void commit() throws SqlException` | Commits the current transaction. Throws `SqlException` if no transaction is active. |
+| `rollback` | `void rollback() throws SqlException` | Rolls back the current transaction. Throws `SqlException` if no transaction is active. |
+| `lastInsertId` | `int\|null lastInsertId()` | Returns the row ID generated by the most recent `INSERT` on this connection (auto-increment / rowid / `LAST_INSERT_ID()`), or `null` if no such row exists (no insert has been performed, or the last statement did not generate an ID). |
+| `isClosed` | `bool isClosed()` | Returns `true` if `close()` has been called on this connection. |
+| `close` | `void close()` | Closes the connection and releases all associated resources (open statements, result sets, pending transaction is implicitly rolled back). Idempotent. |
+
+The runtime may provide a destructor that calls `close()` if a `Connection` goes out of scope without being closed. Multiple calls to `close()` have no effect after the first. **After the connection has been closed, `prepare`, `query`, `execute`, `beginTransaction`, `commit`, `rollback`, and `lastInsertId` throw `SqlException`.**
+
+### system.db.PreparedStatement
+
+Represents a compiled SQL statement with `?` placeholders. Obtained from `Connection.prepare(string)`. Bind values to placeholders (0-based) with `bindX(...)`, then run the statement with `query()` (for `SELECT`) or `execute()` (for `INSERT`/`UPDATE`/`DELETE`/DDL). A statement can be reused: call `reset()` (or bind again) to run it with new parameters.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `parameterCount` | `int parameterCount()` | Returns the number of `?` placeholders in the statement. |
+| `bindInt` | `void bindInt(int index, int value) throws SqlException` | Binds `value` to placeholder at `index` (0-based). |
+| `bindFloat` | `void bindFloat(int index, float value) throws SqlException` | Binds `value` to placeholder at `index`. |
+| `bindBool` | `void bindBool(int index, bool value) throws SqlException` | Binds `value` to placeholder at `index`. Drivers without a native boolean type encode `true`/`false` as `1`/`0`. |
+| `bindString` | `void bindString(int index, string value) throws SqlException` | Binds `value` to placeholder at `index` (transmitted as UTF-8 text). |
+| `bindBytes` | `void bindBytes(int index, byte[] value) throws SqlException` | Binds `value` to placeholder at `index` (transmitted as `BLOB`/`VARBINARY`). |
+| `bindNull` | `void bindNull(int index) throws SqlException` | Binds SQL `NULL` to placeholder at `index`. |
+| `query` | `ResultSet query() throws SqlException` | Executes the statement with the currently bound parameters and returns a result set. Use for `SELECT`. |
+| `execute` | `int execute() throws SqlException` | Executes the statement with the currently bound parameters and returns the number of rows affected. Use for `INSERT`/`UPDATE`/`DELETE`/DDL. |
+| `reset` | `void reset() throws SqlException` | Clears all bound parameters and resets the statement so it can be re-executed with new bindings. Does not close the statement. |
+| `isClosed` | `bool isClosed()` | Returns `true` if `close()` has been called on this statement (or if the parent connection has been closed). |
+| `close` | `void close()` | Closes the statement and releases its compiled form. Idempotent. |
+
+Binding methods throw `SqlException` when `index < 0` or `index >= parameterCount()`, when the driver reports a type-conversion failure, or when the statement (or its connection) has been closed. `query`/`execute` throw `SqlException` if any placeholder is left unbound, if the SQL execution fails (constraint violation, syntax error reported lazily, deadlock, connection lost, etc.), or if the statement (or its connection) has been closed.
+
+### system.db.ResultSet
+
+Represents the rows produced by a `SELECT`. Rows are consumed one at a time by calling `next()`, which returns the next [Row](#systemdbrow) or `null` when the set is exhausted. A `ResultSet` holds a native cursor and **must** be closed when done.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `next` | `Row\|null next() throws SqlException` | Advances the cursor and returns the next row, or `null` when there are no more rows. |
+| `columnCount` | `int columnCount()` | Returns the number of columns in each row of the result set. |
+| `columnName` | `string columnName(int index) throws SqlException` | Returns the name of the column at `index` (0-based). Throws `SqlException` if `index` is out of range. |
+| `isClosed` | `bool isClosed()` | Returns `true` if `close()` has been called on this result set (or if the parent statement/connection has been closed). |
+| `close` | `void close()` | Closes the result set and releases the underlying cursor. Idempotent. |
+
+`ResultSet` supports the [for-each loop](specs.md#loops): `for (const auto row : results) { ... }` iterates by repeatedly calling `next()` until `null` is returned. The result set is not automatically closed at the end of the loop — call `close()` (or rely on the destructor). Any `Row` returned by `next()` is invalidated on the next call to `next()` or `close()`; the caller must copy any value they need to keep past that point.
+
+**After a result set has been closed**, `next`, `columnCount` (when the count was not cached before close), and `columnName` throw `SqlException`.
+
+### system.db.Row
+
+Represents a single row from a [ResultSet](#systemdbresultset). Columns are accessed by 0-based index; typed accessors return the value converted to the requested NL type. Every typed accessor returns a nullable union (`T|null`) — SQL `NULL` maps to NL `null`.
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `columnCount` | `int columnCount() const` | Returns the number of columns in the row (same value as `ResultSet.columnCount()`). |
+| `columnType` | `ColumnType columnType(int index) const` | Returns the [ColumnType](#systemdbcolumntype) of the value at `index`. Throws `IndexOutOfBoundsException` if `index` is out of range. |
+| `isNull` | `bool isNull(int index) const` | Returns `true` if the value at `index` is SQL `NULL`. Throws `IndexOutOfBoundsException` if `index` is out of range. |
+| `getInt` | `int\|null getInt(int index) const` | Returns the value at `index` as `int`, or `null` if the value is SQL `NULL`. Throws `InvalidCastException` if the value cannot be represented as an `int` (e.g. text that does not parse, blob). |
+| `getFloat` | `float\|null getFloat(int index) const` | Returns the value at `index` as `float`, or `null` if SQL `NULL`. Throws `InvalidCastException` on type mismatch. |
+| `getBool` | `bool\|null getBool(int index) const` | Returns the value at `index` as `bool`, or `null` if SQL `NULL`. Throws `InvalidCastException` on type mismatch. |
+| `getString` | `string\|null getString(int index) const` | Returns the value at `index` as `string` (UTF-8-decoded for text columns), or `null` if SQL `NULL`. Throws `InvalidCastException` on type mismatch. |
+| `getBytes` | `byte[]\|null getBytes(int index) const` | Returns the value at `index` as a byte array, or `null` if SQL `NULL`. Throws `InvalidCastException` on type mismatch. |
+
+**Column lookup by name.** For readability, every typed accessor has an overload that takes the column name instead of the index: `getInt(string columnName)`, `getFloat(string columnName)`, `getBool(string columnName)`, `getString(string columnName)`, `getBytes(string columnName)`, `isNull(string columnName)`, `columnType(string columnName)`. These overloads resolve the name to the corresponding index (case-sensitive, first match) and throw `SqlException` if no column with that name exists in the row. When a query aliases columns (`SELECT id AS user_id ...`), the alias is the name to use.
+
+`Row` instances are valid only until the next call to `ResultSet.next()` or `ResultSet.close()`. Passing a stale `Row` reference to any accessor throws `SqlException`.
+
+### Example (driver-agnostic)
+
+```nl
+// Open a connection (driver-specific factory)
+system.db.Connection db = system.db.sqlite.Sqlite.open("app.db");
+try {
+    // DDL and constant SQL: query()/execute() with no user input
+    db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)");
+
+    // Parameterized INSERT — user input is bound, never interpolated
+    auto ins = db.prepare("INSERT INTO users(name, age) VALUES (?, ?)");
+    try {
+        db.beginTransaction();
+        ins.bindString(0, "Ada");
+        ins.bindInt(1, 36);
+        ins.execute();
+
+        ins.reset();
+        ins.bindString(0, "Linus");
+        ins.bindInt(1, 55);
+        ins.execute();
+
+        db.commit();
+    }
+    catch (system.db.SqlException ex) {
+        db.rollback();
+        throw ex;
+    }
+    finally {
+        ins.close();
+    }
+
+    // Parameterized SELECT — for-each iteration on the ResultSet
+    auto q = db.prepare("SELECT id, name, age FROM users WHERE age >= ? ORDER BY id");
+    q.bindInt(0, 18);
+    auto rows = q.query();
+    try {
+        for (const auto row : rows) {
+            int|null id = row.getInt("id");
+            string|null name = row.getString("name");
+            int|null age = row.getInt("age");
+            system.Out.println(id + " " + name + " " + age);
+        }
+    }
+    finally {
+        rows.close();
+        q.close();
+    }
+}
+finally {
+    db.close();
+}
+```
+
+---
+
+## system.db.sqlite
+
+SQLite driver. Provides a static factory that returns a `system.db.Connection` backed by an embedded SQLite database. All methods are **static**.
+
+### system.db.sqlite.SqliteOpenMode
+
+Enum controlling how a SQLite database file is opened.
+
+| Case | File absent | File exists |
+|------|-------------|-------------|
+| `ReadOnly` | `SqlException` | Opens read-only |
+| `ReadWrite` | `SqlException` | Opens read-write |
+| `ReadWriteCreate` | Creates | Opens read-write |
+
+### system.db.sqlite.Sqlite
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `open` | `static Connection open(string path) throws SqlException` | Opens the SQLite database at `path` in `ReadWriteCreate` mode. Returns a `system.db.Connection`. |
+| `open` | `static Connection open(string path, SqliteOpenMode mode) throws SqlException` | Opens the SQLite database at `path` with the given mode. |
+| `openMemory` | `static Connection openMemory() throws SqlException` | Opens a private, in-memory database. The database exists only for the lifetime of the returned `Connection`. |
+
+**Security (path traversal).** `open(string path, ...)` performs no path sanitization — the same rule as [system.io.File](#systemiofile) applies. Never pass user-controlled input directly as the database path; resolve with [`system.io.Path.normalize`](#systemiopath) and verify the result stays under an allowed base directory. Even in `ReadOnly` mode, opening an arbitrary file interprets it as a SQLite database (which may cause reads of unexpected content and leak information via error messages).
+
+**Example**
+
+```nl
+system.db.Connection db = system.db.sqlite.Sqlite.open(
+    "cache.db",
+    system.db.sqlite.SqliteOpenMode.ReadWriteCreate
+);
+// ... use db ...
+db.close();
+
+// In-memory database (unit tests, ephemeral caches)
+auto mem = system.db.sqlite.Sqlite.openMemory();
+mem.execute("CREATE TABLE t(x INTEGER)");
+mem.close();
+```
+
+---
+
+## system.db.mysql
+
+MySQL / MariaDB driver. Provides a static factory that returns a `system.db.Connection` backed by a TCP connection to a MySQL-compatible server.
+
+### system.db.mysql.MysqlConfig
+
+Configuration for a MySQL connection. Instantiated by user code and passed to `Mysql.connect(...)`. All fields are `public`; the constructor takes them positionally, but callers should prefer [named parameters](specs.md#named-parameters) for readability.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | `string` | — | Server hostname or IP address. |
+| `port` | `int` | `3306` | Server TCP port. |
+| `user` | `string` | — | Login user name. |
+| `password` | `string` | — | Login password (empty string when none). |
+| `database` | `string` | `""` | Initial database to select (empty string means "no default database"; must then be selected with `USE ...`). |
+| `useTls` | `bool` | `true` | If `true`, negotiate TLS with the server after the initial handshake and validate the server certificate. |
+
+Constructor: `construct(string host, int port, string user, string password, string database, bool useTls)`.
+
+### system.db.mysql.Mysql
+
+| Method | Signature | Description |
+|--------|------------|-------------|
+| `connect` | `static Connection connect(MysqlConfig config) throws SqlException` | Opens a connection to the MySQL server described by `config`. Returns a `system.db.Connection`. |
+
+**TLS (`useTls = true`).** When TLS is requested, the implementation **must validate the server certificate by default**: chain of trust against the platform trust store, expiration, and hostname verification (against `config.host`). A failed validation **must** throw `SqlException` — silently proceeding would expose credentials and query data to man-in-the-middle attacks. Same contract as [`system.net.Http`](#systemnethttp) for `https://` URLs. No option to disable validation is specified; custom trust stores and certificate pinning may be specified in a future version.
+
+**Security (credentials).** Never log or print `config.password`, and never include it in error messages or in the string form of a `MysqlConfig`. Prefer loading credentials from `system.Env` or a secrets file rather than embedding them in source. Do not interpolate `config.host`, `config.user`, or `config.database` from untrusted input without validation — a hostile hostname can point at an attacker-controlled server that harvests credentials.
+
+**Example**
+
+```nl
+auto config = new system.db.mysql.MysqlConfig(
+    host: "db.example.com",
+    port: 3306,
+    user: system.Env.get("DB_USER") ?? "app",
+    password: system.Env.get("DB_PASSWORD") ?? "",
+    database: "app",
+    useTls: true
+);
+system.db.Connection db = system.db.mysql.Mysql.connect(config);
+try {
+    auto q = db.prepare("SELECT COUNT(*) FROM orders WHERE customer_id = ?");
+    q.bindInt(0, customerId);
+    auto rows = q.query();
+    try {
+        auto row = rows.next();
+        if (row != null) {
+            int|null count = row.getInt(0);
+            system.Out.println("orders: " + (count ?? 0));
+        }
+    }
+    finally {
+        rows.close();
+        q.close();
+    }
+}
+finally {
+    db.close();
+}
+```
+
+---
+
 ## Exceptions
 
 Standard exceptions used by the system API. The hierarchy (Runtime vs Checked) is defined in the language specification (see [specs.md](specs.md)#exception-class-hierarchy). **Runtime** exceptions do not require a `throws` declaration; **Checked** exceptions must be declared or handled.
@@ -1163,6 +1430,7 @@ Standard exceptions used by the system API. The hierarchy (Runtime vs Checked) i
 | `FormatException` | Checked | `system.time` | `system.time.DateTime.parse()` when the string format is invalid. |
 | `FormatException` | Checked | `system.text` | `system.text.Encoding.base64Decode()` when the string is not valid base64. |
 | `JsonFormatException` | Checked | `system.text.json` | `system.text.json.Json.parse()` when `text` is not valid JSON. Extends `system.text.FormatException`; carries `line`, `column`, `expectedToken`, `foundToken`. |
+| `SqlException` | Checked | `system.db` | `system.db.Connection`, `system.db.PreparedStatement`, `system.db.ResultSet`, and driver factories (`system.db.sqlite.Sqlite.open`, `system.db.mysql.Mysql.connect`) on any database failure: connection error, TLS validation failure, SQL syntax error, constraint violation, deadlock, type-conversion failure during `bindX`, out-of-range placeholder or column name, use of a closed connection/statement/result set, use of a stale `Row`. Carries `sqlState` (SQLSTATE code, empty string when the driver does not provide one) and `errorCode` (driver-specific numeric code, `0` when not provided). |
 
 ---
 
