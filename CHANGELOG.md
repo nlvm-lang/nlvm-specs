@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.47 — 2026-07-21
+
+### Added
+
+- **docs/specs.md** — § Exception class hierarchy: `Exception.printStackTrace()` — writes `message` and one `"    at " + file + ":" + line` line per `stackTrace` frame to `system.Err`, mirroring the VM's own unhandled-exception output. Documented limitation: without a reflection API, the output cannot be prefixed with the exception's runtime class name (unlike Java's `Throwable.printStackTrace()`).
+- **docs/specs.md** — § Planned: **Reflection API** — no `getClass()`/runtime-type-name mechanism exists yet; tracked as a prerequisite for extending `printStackTrace()` (or a future `toString()`) with the exception's runtime class name.
+
 ## 0.8.46 — 2026-07-21
 
 ### Added

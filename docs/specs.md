@@ -2428,6 +2428,7 @@ class readonly Exception {
     public construct(string what);
     public string message;
     public ExecutionPoint[] stackTrace;
+    public void printStackTrace();
 }
 
 class readonly ExecutionPoint {
@@ -2496,6 +2497,14 @@ constructor**: when `construct(string what)` runs (directly or via `super(...)` 
 captures the current call stack and assigns it to `stackTrace` before the constructor returns. This respects the
 `readonly` rule — the field is assigned inside `construct`, like any other readonly property — and requires **no
 readonly bypass** by the VM (see [vm.md § Stack trace construction](vm.md#stack-trace-construction)).
+
+**`printStackTrace()`.** Writes `message` to `system.Err`, followed by one line per `stackTrace` frame in the
+format `"    at " + file + ":" + line`, in capture order (throw site first). This mirrors the format the VM itself
+uses when an unhandled exception reaches the top of `main` (see [vm.md § Program startup](vm.md#program-startup)).
+**Known limitation:** NL has no reflection API yet (see [Planned § Reflection API](#planned)), so
+`printStackTrace()` cannot prefix the output with the exception's runtime class name (e.g. `NullPointerException:`)
+the way `Throwable.printStackTrace()` does in Java — only `message` and the frame list are available. A future
+reflection API may extend this output with the runtime type name.
 
 ### Declaring exceptions
 
@@ -2852,6 +2861,8 @@ The following features may be added to the spec in future versions:
 - **Parsable interface** — A template interface `Parsable<T>` with a static abstract method `static T parse(string s)` would unify the parsing contract of `system.Int`, `system.Float`, and `system.Bool`. This requires support for static abstract interface members (similar to C# 11), enabling generic code to call `T.parse(s)` when `T` is constrained by `Parsable<T>`.
 
 - **Subscript operator overloading (`operator[]`)** — Allowing classes to overload `[]` (indexed get/set) would benefit collection-like types. Currently `[]` is reserved to arrays and native collections (see [Overloadable operators](#overloadable-operators)).
+
+- **Reflection API** — No mechanism exists to inspect an object's runtime type (e.g. a `getClass()`/type-name accessor). This currently limits [`Exception.printStackTrace()`](#exception-class-hierarchy), which cannot prefix its output with the exception's runtime class name. A future reflection API should be specified before extending `printStackTrace()` or `toString()`-style output with type-name information.
 
 
 [1]: #conditionals
